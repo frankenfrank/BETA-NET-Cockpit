@@ -672,11 +672,26 @@ function Remove-WolMarkierte {
     Save-WolAuto
 }
 
-## Name, unter dem ein Gerät per WinRM angesprochen wird: der Hostname, bei Sonderzeichen (zum Beispiel Umlauten) oder ohne Hostname die IP-Adresse
+## Prüfen, ob sich ein Hostname auflösen lässt (DNS, hosts-Datei); das Ergebnis wird 10 Minuten gemerkt, damit nicht bei jedem Aufruf neu abgefragt wird
+$script:NameAufloesung = @{}
+function Test-WolNameAufloesbar {
+    param([string]$Name)
+    $eintrag = $script:NameAufloesung[$Name]
+    if ($eintrag -and ((Get-Date) - $eintrag.Zeit).TotalMinutes -lt 10) { return $eintrag.Ok }
+    $ok = $false
+    try { $ok = (@([System.Net.Dns]::GetHostAddresses($Name)).Count -gt 0) } catch { }
+    $script:NameAufloesung[$Name] = @{ Ok = $ok; Zeit = Get-Date }
+    if (-not $ok) { Write-WolLog "Hostname $Name lässt sich nicht auflösen, das Cockpit verbindet sich per IP-Adresse" }
+    return $ok
+}
+
+## Name, unter dem ein Gerät per WinRM angesprochen wird: der Hostname, bei Sonderzeichen (zum Beispiel Umlauten), ohne Hostname oder wenn sich der Hostname nicht auflösen lässt (zum Beispiel Gerät ohne Domäne) die IP-Adresse
 function Get-WolZielName {
     param($Zeile)
     $name = [string]$Zeile.Hostname
-    if ($name -and $name -match '^[\x21-\x7E]+$') { return $name }
+    if ($name -and $name -match '^[\x21-\x7E]+$') {
+        if (-not [string]$Zeile.IP -or (Test-WolNameAufloesbar -Name $name)) { return $name }
+    }
     return [string]$Zeile.IP
 }
 
@@ -1652,7 +1667,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Wirkung:** Alles, was sich per WinRM anmeldet, nutzt das Konto des jeweiligen Geräts. Aufwecken (Modul WOL), Portscan, Dauerping, Scan und Statusprüfung melden sich nirgends an.' }
         @{ T = 'h'; X = 'TrustedHosts' }
         @{ T = 'i'; X = '**Scheitert eine Verbindung an den TrustedHosts,** zeigt das Cockpit nach dem Lauf einmal eine Liste der betroffenen Geräte und bietet an, sie auf diesem Rechner einzutragen. Danach die Aktion erneut ausführen.' }
-        @{ T = 'i'; X = '**Optionen > Verbindung:** Markierte eintragen, Markierte entfernen und TrustedHosts anzeigen. Eingetragen wird der Name, mit dem das Cockpit das Gerät anspricht (Hostname, bei Sonderzeichen oder ohne Hostname die IP-Adresse). Vorhandene Einträge bleiben, Doppelte werden vermieden. Steht dort * (alle Hosts), entfernt das Cockpit nichts einzeln.' }
+        @{ T = 'i'; X = '**Optionen > Verbindung:** Markierte eintragen, Markierte entfernen und TrustedHosts anzeigen. Eingetragen wird der Name, mit dem das Cockpit das Gerät anspricht (Hostname; bei Sonderzeichen, ohne Hostname oder wenn sich der Hostname nicht auflösen lässt die IP-Adresse). Vorhandene Einträge bleiben, Doppelte werden vermieden. Steht dort * (alle Hosts), entfernt das Cockpit nichts einzeln.' }
         @{ T = 'w'; X = 'Für die TrustedHosts braucht das Cockpit Administratorrechte (PowerShell 7 als Administrator starten). TrustedHosts schaltet die Prüfung der Gegenstelle für diese Geräte ab.' }
     ) })
 
@@ -1721,6 +1736,7 @@ function Get-WolInfoInhalt {
             @{ T = 'i'; X = 'Vom Admin-PC: **Test-NetConnection -ComputerName** mit der IP des Geräts (Ping) und mit **-Port 5985** (TcpTestSucceeded muss True sein).' }
             @{ T = 'h'; X = 'Anmeldung ohne Domäne' }
             @{ T = 'i'; X = 'Im Cockpit unter **Optionen > Konto für markierte Geräte** das lokale Konto als **.\Benutzername** eintragen.' }
+            @{ T = 'i'; X = 'Lässt sich der Hostname eines Geräts nicht auflösen (ohne Domäne meist kein DNS-Eintrag), verbindet sich das Cockpit automatisch per IP-Adresse. Dafür braucht die IP den Eintrag in den TrustedHosts, und Konto und Kennwort werden abgefragt.' }
             @{ T = 'i'; X = 'Der Admin-PC braucht die Geräte in den TrustedHosts: **Optionen > Verbindung** (das Cockpit muss dafür als Administrator laufen).' }
             @{ T = 'i'; X = 'Bei lokalen Konten außer dem eingebauten Administrator filtert Windows das Admin-Token beim Remotezugriff, solange **LocalAccountTokenFilterPolicy** nicht gesetzt ist.' }
         ) }
