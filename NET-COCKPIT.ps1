@@ -904,13 +904,18 @@ $script:KudoBlock = {
             $hddClient = (@($platten | ForEach-Object { '{0}{1}GB' -f $_.DeviceID, [math]::Round($_.Size / 1GB, 0) })) -join '; '
             $hddServer = (@($platten | ForEach-Object { '{0}:{1}' -f $_.DeviceID.TrimEnd(':'), [math]::Round([math]::Round($_.Size / 1TB, 2) * 1000, 0) })) -join '; '
 
-            ### TeamViewer-ID aus der Registrierung (REG_DWORD ClientID, als vorzeichenlose Dezimalzahl)
+            ### TeamViewer-ID aus der Registrierung (REG_DWORD ClientID, als vorzeichenlose Dezimalzahl); zuerst WOW6432Node, sonst der Pfad ohne WOW6432Node
             $tvId = 'nicht gefunden'
-            try {
-                $tvWert = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer' -Name 'ClientID' -ErrorAction Stop).ClientID
-                $tvId = [string][System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int]$tvWert), 0)
+            foreach ($tvPfad in 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer', 'HKLM:\SOFTWARE\TeamViewer') {
+                try {
+                    $tvWert = (Get-ItemProperty -Path $tvPfad -Name 'ClientID' -ErrorAction Stop).ClientID
+                    if ($null -ne $tvWert) {
+                        $tvId = [string][System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int]$tvWert), 0)
+                        break
+                    }
+                }
+                catch { }
             }
-            catch { $tvId = 'nicht gefunden' }
 
             ### Serverrollen und IP-Adressen (nur Server)
             $rollenText = ''
@@ -1642,7 +1647,7 @@ function Get-WolInfoInhalt {
         @{ T = 'h'; X = 'KuDo-Informationen auslesen' }
         @{ T = 'i'; X = '**KuDo-Informationen auslesen:** liest die Geräteinformationen der markierten Geräte aus. Das Cockpit prüft dafür je Gerät live die Ports: Ist WinRM (5985) offen, gilt das Gerät als Windows, auch wenn SSH ebenfalls offen ist. Sonst gilt es bei offenem SSH-Port 22 als Linux. Rote Geräte und Geräte, bei denen beide Ports zu sind, werden übersprungen. Das Ergebnis steht im Log und in der orangen Statuszeile; ein Fehler zeigt kurz die Spalte "Aktion / Status", der volle Text steht in der Logdatei.' }
         @{ T = 'i'; X = '**Hostname, MAC und Hersteller:** werden beim Auslesen in die Tabelle ergänzt, aber nur in leere Zellen; vorhandene Werte werden nie überschrieben. Die MAC kommt vom Adapter mit der Geräte-IP. Virtuelle Adapter (zum Beispiel VPN) zählen nicht: Dann gilt die MAC des einzigen aktiven physischen Adapters, bei mehreren bleibt das Feld leer. Eine MAC, die schon in einer anderen Zeile steht, wird nicht eingetragen. Der Hersteller kommt aus der Herstellerliste. Geräte ohne Hostname werden per IP angesprochen, dafür fragt das Cockpit Konto und Kennwort ab.' }
-        @{ T = 'i'; X = '**TeamViewer-ID:** steht bei Windows-Geräten als letztes Feld in den KuDo-Informationen. Sie wird aus der Registrierung gelesen (HKLM\SOFTWARE\WOW6432Node\TeamViewer, Wert ClientID) und als Dezimalzahl angezeigt; ohne TeamViewer steht "nicht gefunden".' }
+        @{ T = 'i'; X = '**TeamViewer-ID:** steht bei Windows-Geräten als letztes Feld in den KuDo-Informationen. Sie wird aus der Registrierung gelesen (HKLM\SOFTWARE\WOW6432Node\TeamViewer, sonst HKLM\SOFTWARE\TeamViewer, Wert ClientID) und als Dezimalzahl angezeigt; ohne TeamViewer steht "nicht gefunden".' }
         @{ T = 'i'; X = '**Typ:** Client (kein Server-Betriebssystem), Server virtuell (Hersteller oder Modell weist auf Hyper-V, VMware, VirtualBox, QEMU/KVM, Xen, Parallels oder Nutanix AHV hin), sonst Server physisch. Steht in der Spalte "Typ" schon Client, Server physisch oder Server virtuell, gilt dieser Typ. Ein vorhandener Eintrag wird nie überschrieben.' }
         @{ T = 'i'; X = '**Anzeige:** im Detailfenster (Doppelklick) mit "Kopieren" je Wert (außer beim freien Speicher der Laufwerke, bei Clients und Servern: dort stehen Text und Balken, der Balken zeigt den belegten Anteil und wird ab 90 % rot). Geänderte Felder gegenüber der vorherigen Auslesung stehen orange mit dem alten Wert. Die Ergebnisse liegen im Datenordner und sind beim nächsten Start wieder da.' }
         @{ T = 'i'; X = '**Linux-Geräte:** brauchen das PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (fehlt es, fragt das Cockpit, ob es für dein Benutzerkonto installiert werden soll: Install-Module -Name Posh-SSH -Scope CurrentUser; dafür braucht dieser Rechner Internet) und in der Spalte "Konto" einen Benutzer mit SSH-Zugang (root hat meist keinen). Die Anmeldung läuft nur mit Kennwort. Vor dem Auslesen testet das Cockpit die Anmeldung. Bei einer Herausforderung (Kennwort, Benutzer, Port, Hostschlüssel) fragt es: Ja = Gerät überspringen und weitermachen, Nein = das gesamte Auslesen abbrechen. Der Hostschlüssel wird beim ersten Kontakt automatisch akzeptiert und gespeichert, danach wird er geprüft. Die Anmeldungen laufen nacheinander, weil Posh-SSH alle Hostschlüssel in einer gemeinsamen Datei speichert.' }
