@@ -1607,7 +1607,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Hostname, Typ, MAC und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
         @{ T = 'i'; X = '**MAC von Hand eintragen oder ändern:** erlaubt sind 00:20:6b:f4:cd:28, 00-20-6b-f4-cd-28 und 00206bf4cd28; gespeichert und angezeigt wird sie als 00:20:6B:F4:CD:28. Eine MAC, die schon in einer anderen Zeile steht, wird abgelehnt (Esc verwirft die Eingabe). Der Hersteller wird neu aus der Herstellerliste bestimmt; eine geleerte MAC leert auch den Hersteller. Gedacht für Geräte, deren MAC nicht automatisch ermittelt werden kann (zum Beispiel Drucker in einem anderen Netz).' }
         @{ T = 'i'; X = '**Doppelklick auf "Aktion / Status"** öffnet das Log dieses Geräts: die Zeilen des Cockpit-Logs und die Logs der Module APP, OS und Treiber, nur für dieses Gerät (mit Aktualisieren).' }
-        @{ T = 'i'; X = '**Doppelklick auf ein Gerät** (in allen anderen Spalten als den bearbeitbaren und Aktion / Status) öffnet das Detailfenster mit allen Infos, den offenen Ports, der Bemerkung und den gespeicherten KuDo-Informationen.' }
+        @{ T = 'i'; X = '**Doppelklick auf ein Gerät** (in allen anderen Spalten als den bearbeitbaren und Aktion / Status) öffnet das Detailfenster mit allen Infos, den offenen Ports (eingeklappt, per Klick aufklappbar), der Bemerkung und den gespeicherten KuDo-Informationen.' }
         @{ T = 'h'; X = 'Besondere Spalten' }
         @{ T = 'i'; X = '**Typ:** frei editierbar. Beim Auslesen der KuDo-Informationen trägt das Cockpit den erkannten Typ ein, aber nur, wenn die Zelle leer ist.' }
         @{ T = 'i'; X = '**Konto:** das Konto, mit dem das Gerät per WinRM angesprochen wird (bei Linux-Geräten der SSH-Benutzer). Ohne eigenes Konto steht dort das Konto, mit dem Du angemeldet bist. Gespeichert wird nur der Benutzername, nie das Kennwort.' }
@@ -2076,7 +2076,9 @@ function Show-WolDetails {
     <TextBlock Grid.Row="6" Text="Status" FontWeight="Bold"/>
     <TextBox x:Name="VStatus" Grid.Row="6" Grid.Column="1" IsReadOnly="True" BorderThickness="0" Background="Transparent" TextWrapping="Wrap"/>
     <TextBlock Grid.Row="7" Text="Offene Ports" FontWeight="Bold"/>
-    <StackPanel x:Name="PortListe" Grid.Row="7" Grid.Column="1" Margin="0,3"/>
+    <Expander x:Name="PortKopf" Grid.Row="7" Grid.Column="1" Margin="0,3" IsExpanded="False">
+      <StackPanel x:Name="PortListe" Margin="0,2,0,0"/>
+    </Expander>
     <TextBlock Grid.Row="8" Text="Bemerkung" FontWeight="Bold"/>
     <TextBox x:Name="VBemerkung" Grid.Row="8" Grid.Column="1" TextWrapping="Wrap" AcceptsReturn="False"/>
     </Grid>
@@ -2113,11 +2115,13 @@ function Show-WolDetails {
 
     $liste = $d.FindName('PortListe')
     $eintraege = @(([string]$Zeile.Ports) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $portKopf = $d.FindName('PortKopf')
     if ($eintraege.Count -eq 0) {
-        $t = [System.Windows.Controls.TextBlock]::new()
-        $t.Text = 'Noch kein Portscan durchgeführt'
-        [void]$liste.Children.Add($t)
+        $portKopf.Header = 'Noch kein Portscan durchgeführt'
+        $portKopf.IsEnabled = $false
     }
+    elseif ($eintraege.Count -eq 1) { $portKopf.Header = '1 offener Port (zum Aufklappen klicken)' }
+    else { $portKopf.Header = ('{0} offene Ports (zum Aufklappen klicken)' -f $eintraege.Count) }
     foreach ($eintrag in $eintraege) {
         $port = 0
         if ($eintrag -match '^(\d+)') { $port = [int]$Matches[1] }
