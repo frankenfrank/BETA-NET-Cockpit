@@ -660,6 +660,17 @@ function Get-WolMarkierte {
     return @($script:C.Gitter.SelectedItems | Where-Object { $script:Ansicht.Contains($_) } | Sort-Object { [array]::IndexOf($angezeigt, $_) })
 }
 
+## Markierte Geräte nach Rückfrage aus der Liste entfernen (Werkzeuge)
+function Remove-WolMarkierte {
+    $ziele = Get-WolMarkierte
+    if ($ziele.Count -eq 0) { Show-WolMeldung 'Es ist kein Gerät markiert.'; return }
+    $antwort = [System.Windows.MessageBox]::Show("$($ziele.Count) Eintrag/Einträge aus der Liste entfernen?", 'NET-COCKPIT', 'YesNo', 'Warning')
+    if ($antwort -ne 'Yes') { return }
+    foreach ($z in $ziele) { [void]$script:Zeilen.Remove($z) }
+    $script:Geaendert = $true
+    Save-WolAuto
+}
+
 ## Name, unter dem ein Gerät per WinRM angesprochen wird: der Hostname, bei Sonderzeichen (zum Beispiel Umlauten) oder ohne Hostname die IP-Adresse
 function Get-WolZielName {
     param($Zeile)
@@ -1560,8 +1571,9 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Rechtsklick auf eine Spaltenüberschrift** (auf den Namen, nicht auf das Filterfeld) oder **Ansicht > Spalten:** Haken setzen oder entfernen. Die Auswahl wird gespeichert (Spalten der Module ausgenommen). Beim Ausblenden wird der Filter dieser Spalte geleert.' }
         @{ T = 'i'; X = '**Spalten der Module** (zum Beispiel Windows-Version oder Neustart ausstehend) sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und werden beim Schließen des Fensters wieder ausgeblendet. Die Werte bleiben in den Zeilen erhalten. Sie werden nicht gespeichert; Ausnahme ist die Spalte **Wartungsreihenfolge** des Moduls WaToKi, sie wird mit der Geräteliste gespeichert.' }
         @{ T = 'h'; X = 'Markieren und Bearbeiten' }
-        @{ T = 'i'; X = '**Alle / Keine / Nur Online markieren** und **Markierte aus Liste entfernen** stehen über der Tabelle.' }
-        @{ T = 'i'; X = '**Hostname, Typ und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
+        @{ T = 'i'; X = '**Alle / Keine / Nur Online markieren** stehen über der Tabelle, **Markierte aus Liste entfernen** im Menü Werkzeuge.' }
+        @{ T = 'i'; X = '**Hostname, Typ, MAC und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
+        @{ T = 'i'; X = '**MAC von Hand eintragen oder ändern:** erlaubt sind 00:20:6b:f4:cd:28, 00-20-6b-f4-cd-28 und 00206bf4cd28; gespeichert und angezeigt wird sie als 00:20:6B:F4:CD:28. Eine MAC, die schon in einer anderen Zeile steht, wird abgelehnt (Esc verwirft die Eingabe). Der Hersteller wird neu aus der Herstellerliste bestimmt; eine geleerte MAC leert auch den Hersteller. Gedacht für Geräte, deren MAC nicht automatisch ermittelt werden kann (zum Beispiel Drucker in einem anderen Netz).' }
         @{ T = 'i'; X = '**Doppelklick auf "Aktion / Status"** öffnet das Log dieses Geräts: die Zeilen des Cockpit-Logs und die Logs der Module APP, OS und Treiber, nur für dieses Gerät (mit Aktualisieren).' }
         @{ T = 'i'; X = '**Doppelklick auf ein Gerät** (in allen anderen Spalten als den bearbeitbaren und Aktion / Status) öffnet das Detailfenster mit allen Infos, den offenen Ports, der Bemerkung und den gespeicherten KuDo-Informationen.' }
         @{ T = 'h'; X = 'Besondere Spalten' }
@@ -1615,6 +1627,8 @@ function Get-WolInfoInhalt {
         @{ T = 'w'; X = 'Eine Firewall oder ein IPS im Netz kann einen Portscan melden.' }
         @{ T = 'h'; X = 'Neuer Client' }
         @{ T = 'i'; X = '**Neuer Client...:** trägt ein Gerät von Hand ein. Pflichtfeld ist die IP-Adresse, optional sind MAC-Adresse, Hostname, Typ, Konto und Bemerkung (die KuDo-Informationen und der Scan ergänzen eine fehlende MAC später; ohne MAC geht kein Aufwecken). Steht eine angegebene MAC schon in der Liste, wird der Eintrag abgelehnt. Bei gleicher IP oder gleichem Hostname fragt das Cockpit nach. Der Hersteller kommt aus der Herstellerliste, danach läuft die Statusprüfung.' }
+        @{ T = 'h'; X = 'Markierte aus Liste entfernen' }
+        @{ T = 'i'; X = '**Markierte aus Liste entfernen:** entfernt die markierten, sichtbaren Geräte nach einer Rückfrage aus der Geräteliste.' }
         @{ T = 'h'; X = 'PowerShell-Befehl senden' }
         @{ T = 'i'; X = '**PowerShell-Befehl senden...:** führt den Text als PowerShell auf den markierten, grünen Geräten aus (höchstens 20). Die Ausgabe steht pro Gerät in einem eigenen Reiter. Der Befehl läuft als ScriptBlock auf dem Zielgerät, Eingaben wie Read-Host funktionieren dort nicht. "Skript laden..." lädt eine .ps1-Datei in das Textfeld.' }
         @{ T = 'h'; X = 'MouseMover' }
@@ -2124,6 +2138,7 @@ $script:Fenster = New-WolFenster @'
         <MenuItem x:Name="MnuPortscanAbbrechen" Header="Portscan abbrechen"/>
         <Separator/>
         <MenuItem x:Name="MnuNeuerClient" Header="Neuer Client..."/>
+        <MenuItem x:Name="MnuEntfernen" Header="Markierte aus Liste entfernen"/>
         <MenuItem x:Name="MnuBefehl" Header="PowerShell-Befehl senden..."/>
         <Separator/>
         <MenuItem x:Name="MnuMouseMover" Header="MouseMover"/>
@@ -2204,7 +2219,6 @@ $script:Fenster = New-WolFenster @'
         <Button x:Name="BtnAlle" Content="Alle markieren"/>
         <Button x:Name="BtnKeine" Content="Keine markieren"/>
         <Button x:Name="BtnNurOnline" Content="Nur Online markieren"/>
-        <Button x:Name="BtnEntfernen" Content="Markierte aus Liste entfernen"/>
       </WrapPanel>
     </DockPanel>
 
@@ -2252,7 +2266,7 @@ $script:Fenster = New-WolFenster @'
 
 foreach ($name in 'BtnAktuellesNetz', 'BtnAnderesNetz', 'TxtNetz', 'BtnScanStart', 'BtnScanStopp', 'TxtScan',
     'BtnFilterLoeschen', 'CmbAnzeige', 'MnuSpalten',
-    'BtnAlle', 'BtnKeine', 'BtnNurOnline', 'BtnEntfernen', 'BtnBeenden',
+    'BtnAlle', 'BtnKeine', 'BtnNurOnline', 'BtnBeenden',
     'Gitter', 'Log', 'TxtListe') {
     $script:C[$name] = $script:Fenster.FindName($name)
 }
@@ -2445,7 +2459,7 @@ foreach ($def in @(
     @{ Key = 'Typ'; Titel = 'Typ'; Eig = 'Typ'; Breite = 120; NurLesen = $false }
     @{ Key = 'Konto'; Titel = 'Konto'; Eig = 'KontoAnzeige'; Breite = 170 }
     @{ Key = 'IP'; Titel = 'IP'; Eig = 'IP'; Sort = 'IpSort'; Breite = 110 }
-    @{ Key = 'MAC'; Titel = 'MAC'; Eig = 'MAC'; Breite = 130 }
+    @{ Key = 'MAC'; Titel = 'MAC'; Eig = 'MAC'; Breite = 130; NurLesen = $false }
     @{ Key = 'Hersteller'; Titel = 'Hersteller'; Eig = 'Hersteller'; Breite = 160 }
     @{ Key = 'Subnetz'; Titel = 'Subnetz'; Eig = 'Subnetz'; Breite = 105 }
     @{ Key = 'ZuletztGesehen'; Titel = 'Zuletzt gesehen'; Eig = 'ZuletztGesehen'; Breite = 120 }
@@ -5007,6 +5021,7 @@ $script:MenueAktionen = [ordered]@{
     MnuBefehl            = { Show-WolBefehl }
     MnuKudo              = { Start-WolKudoMarkierte }
     MnuNeuerClient       = { Show-WolNeuerClient }
+    MnuEntfernen         = { Remove-WolMarkierte }
     MnuEinzelScan        = { Start-WolEinzelScan }
     MnuMouseMover        = { Open-WolModul -Key 'MOUSEMOVER' }
     MnuHersteller        = { Start-WolHerstellerDownload }
@@ -5036,16 +5051,39 @@ $script:C.BtnNurOnline.Add_Click({
         if ($z.Ampel -in 'Gruen', 'Gelb') { [void]$script:C.Gitter.SelectedItems.Add($z) }
     }
 })
-$script:C.BtnEntfernen.Add_Click({
-    $ziele = Get-WolMarkierte
-    if ($ziele.Count -eq 0) { Show-WolMeldung 'Es ist kein Gerät markiert.'; return }
-    $antwort = [System.Windows.MessageBox]::Show("$($ziele.Count) Eintrag/Einträge aus der Liste entfernen?", 'NET-COCKPIT', 'YesNo', 'Warning')
-    if ($antwort -ne 'Yes') { return }
-    foreach ($z in $ziele) { [void]$script:Zeilen.Remove($z) }
+$script:C.Gitter.Add_CellEditEnding({
+    param($sender, $e)
     $script:Geaendert = $true
-    Save-WolAuto
+    ### MAC-Spalte: Eingabe prüfen und als AA:BB:CC:DD:EE:FF übernehmen, Hersteller neu bestimmen
+    if ($e.EditAction -ne [System.Windows.Controls.DataGridEditAction]::Commit) { return }
+    if ($e.Column.SortMemberPath -ne 'MAC') { return }
+    $feld = $e.EditingElement -as [System.Windows.Controls.TextBox]
+    if (-not $feld) { return }
+    $z = $e.Row.Item
+    $text = $feld.Text.Trim()
+    if (-not $text) {
+        $feld.Text = ''
+        $z.Hersteller = ''
+        Write-WolLog "MAC von $(if ($z.Hostname) { $z.Hostname } else { $z.IP }) geleert"
+        return
+    }
+    $mac = ConvertTo-WolMac -Text $text
+    if (-not $mac) {
+        $e.Cancel = $true
+        Show-WolMeldung 'Die MAC-Adresse ist ungültig. Erwartet werden 12 Hexadezimalzeichen, zum Beispiel 00:20:6b:f4:cd:28, 00-20-6b-f4-cd-28 oder 00206bf4cd28. Esc verwirft die Eingabe.'
+        return
+    }
+    $andere = $script:Zeilen | Where-Object { $_ -ne $z -and $_.MAC -eq $mac } | Select-Object -First 1
+    if ($andere) {
+        $e.Cancel = $true
+        Show-WolMeldung "Diese MAC-Adresse steht schon in der Liste ($(if ($andere.Hostname) { $andere.Hostname } else { $andere.IP }), IP $($andere.IP)). Esc verwirft die Eingabe."
+        return
+    }
+    $feld.Text = $mac
+    $h = Get-WolHerstellerName -Mac $mac
+    $z.Hersteller = $(if ($h) { $h } else { '' })
+    Write-WolLog "MAC von $(if ($z.Hostname) { $z.Hostname } else { $z.IP }) eingetragen: $mac"
 })
-$script:C.Gitter.Add_CellEditEnding({ $script:Geaendert = $true })
 $script:C.Gitter.Add_BeginningEdit({ $script:Bearbeitet = $true })
 ## Log eines Geräts: Zeilen aus dem Cockpit-Log und die Logs der Module APP, OS und Treiber, nur für dieses Gerät
 function Get-WolGeraeteLogText {
