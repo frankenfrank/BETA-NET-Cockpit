@@ -11,7 +11,8 @@
     - Die Anmeldedaten gehen über eine verschlüsselte Temp-Datei (nur für das angemeldete Windows-Konto lesbar), die der Startbefehl sofort nach dem Einlesen löscht
     - Das Modul fragt keine Kennwörter ab: fehlt bei einem markierten Gerät mit Konto das Kennwort der Sitzung, startet nichts und die Geräte werden genannt (Konto im Cockpit pro Gerät setzen)
     - Skripte ohne diese Parameter starten unverändert und fragen wie bisher selbst nach
-    - Spalte "Wartungsreihenfolge": bearbeitbar, sichtbar nur, solange das Fenster offen ist; der Wert wird mit der Geräteliste gespeichert
+    - Spalte "Wartungsreihenfolge": bearbeitbar, sichtbar nur, wenn im Fenster der Haken "Spalte Wartungsreihenfolge in der Tabelle anzeigen" gesetzt ist; der Wert wird mit der Geräteliste gespeichert
+    Beim Start über start.ps1 fehlt der Unterordner anfangs; das Modul holt die Skripte dann beim ersten Öffnen mit Ladefenster vom Server (Signaturprüfung) in den Ordner neben dem Modul.
     Sonst speichert das Modul nichts.
 #>
 
@@ -249,14 +250,14 @@ function script:Start-WolWtSkript {
         }
         catch { $c.TxtStatus.Text = $_.Exception.Message; return }
         if ($konto) {
-            $anmeldeDatei = Join-Path ([System.IO.Path]::GetTempPath()) ('WaToKi_Anmeldung_' + [guid]::NewGuid().ToString('N') + '.xml')
+            $anmeldeDatei = Join-Path ([System.IO.Path]::GetTempPath()) ('NET-COCKPIT_Anmeldung_' + [guid]::NewGuid().ToString('N') + '.xml')
             try { $konto | Export-Clixml -LiteralPath $anmeldeDatei -ErrorAction Stop }
             catch { $c.TxtStatus.Text = "Die Anmeldedaten konnten nicht übergeben werden: $($_.Exception.Message)"; return }
             $script:WtAnmeldeDatei = $anmeldeDatei
         }
     }
 
-    ### Befehl aufbauen: Fehler im Skript lassen das Fenster offen, wie im WaToKi-Starter
+    ### Befehl aufbauen: Fehler im Skript lassen das Fenster offen, wie im bisherigen Starter
     $befehl = "& '" + (ConvertTo-WolWtText $s.Pfad) + "'"
     if ($s.HatZiel) {
         $liste = ($ziele | ForEach-Object { "'" + (ConvertTo-WolWtText $_) + "'" }) -join ','
@@ -301,6 +302,10 @@ function script:Start-WolWtSkript {
 ## Wird vom Menü Module > WaToKi aufgerufen: Fenster neben der Tabelle (bleibt offen, die Tabelle bleibt bedienbar)
 function script:Show-WolModulWATOKI {
     if ($script:WtFenster) { [void]$script:WtFenster.Activate(); return }
+    ### Start über start.ps1: Die Wartungsskripte liegen noch nicht im Ordner und werden jetzt mit Ladefenster vom Server geholt
+    if ($script:ServerBasis -and $script:ServerSchluessel -and -not (Test-Path -LiteralPath (Get-WolWtSkriptOrdner))) {
+        [void](Install-WolNachladen -Titel 'Modul WaToKi: Wartungsskripte werden geladen' -RepoOrdner $script:WtUnterordner -ZielOrdner (Get-WolWtSkriptOrdner))
+    }
     $f = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -326,7 +331,9 @@ function script:Show-WolModulWATOKI {
       <Button x:Name="BtnStart" Content="&#9654; Starten" Padding="16,6" Margin="0,0,8,0" FontWeight="Bold"/>
       <Button x:Name="BtnAusgabe" Content="Ausgabeordner öffnen" Padding="10,6" Margin="0,0,8,0"/>
       <Button x:Name="BtnNeu" Content="Liste aktualisieren" Padding="10,6" Margin="0,0,8,0"/>
-      <Button x:Name="BtnSchliessen" Content="Schließen" Padding="10,6"/>
+      <Button x:Name="BtnSchliessen" Content="Schließen" Padding="10,6" Margin="0,0,16,0"/>
+      <CheckBox x:Name="ChkSpalten" Content="Spalte Wartungsreihenfolge in der Tabelle anzeigen" VerticalAlignment="Center"
+                ToolTip="Blendet die Spalte Wartungsreihenfolge in der Tabelle ein (Standard: aus). Beim Schließen des Fensters wird sie wieder ausgeblendet"/>
     </StackPanel>
     <TextBlock x:Name="TxtStatus" Grid.Row="3" TextWrapping="Wrap" Foreground="DimGray" Margin="0,8,0,0"/>
   </Grid>
@@ -335,6 +342,7 @@ function script:Show-WolModulWATOKI {
     $f.Owner = $script:Fenster
     $script:WtC = @{}
     foreach ($name in 'Liste', 'TxtInfo', 'BtnStart', 'BtnAusgabe', 'BtnNeu', 'BtnSchliessen', 'TxtStatus') { $script:WtC[$name] = $f.FindName($name) }
+    Connect-WolModulSpaltenHaken -Fenster $f -Key 'WATOKI'
     $script:WtC.Liste.Add_SelectionChanged({ Show-WolWtBeschreibung })
     $script:WtC.Liste.Add_MouseDoubleClick({ Start-WolWtSkript })
     $script:WtC.BtnStart.Add_Click({ Start-WolWtSkript })
@@ -366,7 +374,7 @@ $script:ModulInfo['WATOKI'] = {
         @{ T = 'i'; X = '**Konto:** Kennt ein Skript den Parameter **-Anmeldedaten**, bekommt es das Konto aus der Spalte "Konto" (Optionen > Konto für markierte Geräte). Das Modul fragt keine Kennwörter ab: Fehlt bei einem Gerät mit Konto das Kennwort (zum Beispiel nach einem Neustart), meldet das Modul die Geräte, nichts startet. Dann das Kennwort im Cockpit pro Gerät setzen und erneut starten. Ohne Eintrag in der Spalte läuft das Skript mit dem angemeldeten Windows-Konto oder fragt selbst. Skripte mit **-AnmeldedatenJeZiel** bekommen für jedes Gerät sein eigenes Konto, Skripte mit nur **-Anmeldedaten** nehmen ein Konto für alle, dort startet bei unterschiedlichen Konten nichts.' }
         @{ T = 'i'; X = '**Übergabe des Kontos:** über eine verschlüsselte Temp-Datei, die nur dein Windows-Konto auf diesem Rechner lesen kann. Der Startbefehl liest sie ein und löscht sie sofort, nach dem Skriptende löscht das Modul sie noch einmal.' }
         @{ T = 'i'; X = '**Param-Block:** Er muss im Skript ganz oben stehen, vor Clear-Host. Sonst erkennt das Modul die Parameter nicht.' }
-        @{ T = 'i'; X = '**Spalte Wartungsreihenfolge:** erscheint, solange das WaToKi-Fenster offen ist, und lässt sich direkt in der Tabelle eintippen (Doppelklick in die Zelle). Der Wert wird mit der Geräteliste gespeichert, die Spalte lässt sich filtern und sortieren (als Text, also 10 vor 2).' }
+        @{ T = 'i'; X = '**Spalte Wartungsreihenfolge:** erscheint, wenn im WaToKi-Fenster der Haken **Spalte Wartungsreihenfolge in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und lässt sich direkt in der Tabelle eintippen (Doppelklick in die Zelle). Der Wert wird mit der Geräteliste gespeichert, die Spalte lässt sich filtern und sortieren (als Text, also 10 vor 2).' }
         @{ T = 'i'; X = '**Log:** Start und Ende eines Skripts stehen im Log des NET-COCKPIT.' }
         @{ T = 'w'; X = 'Noch nicht getestet: Fenster, Starten, Sperre und Parameterübergabe auf einem echten Rechner.' }
     ) }

@@ -21,10 +21,10 @@
     - Konto pro Gerät (Spalte "Konto"; Dialog mit vorbelegtem Benutzernamen, leeres Kennwort erlaubt = Abfrage bei der ersten Aktion); scheitert eine Verbindung an den TrustedHosts, bietet das Cockpit das Eintragen an
     - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
-    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen
-    - Modul APP: Status, App-Updates, Programme installieren und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
+    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
     - Modul WOL: Wake-on-LAN prüfen und einrichten (Netzwerkkarte, Schnellstart, BIOS bei Dell, HP, Lenovo), Tool nachinstallieren (Dell) und Geräte per Magic Packet aufwecken
-    - Modul WaToKi (Spalte "Wartungsreihenfolge", bearbeitbar, wird mit der Geräteliste gespeichert; sichtbar, solange das Fenster offen ist): startet die Wartungsskripte aus dem Unterordner WaToKi in einem eigenen PowerShell-Fenster, immer nur eines gleichzeitig; markierte Geräte und der Ausgabeordner (Modul-WaToKi im Datenordner) werden übergeben, wenn das Skript die Parameter -Ziel, -Ausgabeordner und -Anmeldedaten kennt (Konto aus der Spalte Konto)
+    - Modul WaToKi (Spalte "Wartungsreihenfolge", bearbeitbar, wird mit der Geräteliste gespeichert; sichtbar, wenn im Fenster der Haken für die Spalte gesetzt ist): startet die Wartungsskripte aus dem Unterordner WaToKi in einem eigenen PowerShell-Fenster, immer nur eines gleichzeitig; markierte Geräte und der Ausgabeordner (Modul-WaToKi im Datenordner) werden übergeben, wenn das Skript die Parameter -Ziel, -Ausgabeordner und -Anmeldedaten kennt (Konto aus der Spalte Konto)
 
 .NOTES
     Voraussetzungen:
@@ -35,6 +35,7 @@
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
     - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
+    - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel); fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
 Clear-Host
@@ -72,6 +73,8 @@ $script:LogPfad           = Join-Path $script:DatenOrdner 'NET-COCKPIT.log'
 $script:OuiPfad           = Join-Path $script:DatenOrdner 'NET-COCKPIT-oui.csv'
 $script:EinstellungenPfad = Join-Path $script:DatenOrdner 'NET-COCKPIT-einstellungen.json'
 $script:ModulOrdner       = $PSScriptRoot
+$script:ServerBasis      = [string]$env:NETCOCKPIT_BASE
+$script:ServerSchluessel  = [string]$env:NETCOCKPIT_KEY
 $script:ListenPfad        = $null
 if (-not (Test-Path $script:DatenOrdner)) { New-Item -Path $script:DatenOrdner -ItemType Directory -Force | Out-Null }
 
@@ -125,6 +128,7 @@ $script:Module = [ordered]@{
 }
 $script:ModulInfo = @{}
 $script:ModulOffen = [System.Collections.Generic.HashSet[string]]::new()
+$script:ModulSpaltenAn = [System.Collections.Generic.HashSet[string]]::new()
 $script:PortNamen    = @{
     21 = 'FTP'; 22 = 'SSH'; 23 = 'Telnet'; 25 = 'SMTP'; 53 = 'DNS'; 80 = 'HTTP'; 88 = 'Kerberos'; 110 = 'POP3'
     111 = 'RPC-Portmapper'; 135 = 'RPC'; 139 = 'NetBIOS'; 143 = 'IMAP'; 389 = 'LDAP'; 443 = 'HTTPS'; 445 = 'SMB'
@@ -1536,7 +1540,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Sortieren:** per Klick auf den Spaltennamen. Beim Start nach IP in Zahlenreihenfolge.' }
         @{ T = 'h'; X = 'Spalten ein- und ausblenden' }
         @{ T = 'i'; X = '**Rechtsklick auf eine Spaltenüberschrift** (auf den Namen, nicht auf das Filterfeld) oder **Ansicht > Spalten:** Haken setzen oder entfernen. Die Auswahl wird gespeichert (Spalten der Module ausgenommen). Beim Ausblenden wird der Filter dieser Spalte geleert.' }
-        @{ T = 'i'; X = '**Spalten der Module** (zum Beispiel Windows-Version oder Neustart ausstehend) sind nur sichtbar, solange ein Modulfenster offen ist, und werden beim Schließen wieder ausgeblendet. Die Werte bleiben in den Zeilen erhalten. Sie werden nicht gespeichert; Ausnahme ist die Spalte **Wartungsreihenfolge** des Moduls WaToKi, sie wird mit der Geräteliste gespeichert.' }
+        @{ T = 'i'; X = '**Spalten der Module** (zum Beispiel Windows-Version oder Neustart ausstehend) sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und werden beim Schließen des Fensters wieder ausgeblendet. Die Werte bleiben in den Zeilen erhalten. Sie werden nicht gespeichert; Ausnahme ist die Spalte **Wartungsreihenfolge** des Moduls WaToKi, sie wird mit der Geräteliste gespeichert.' }
         @{ T = 'h'; X = 'Markieren und Bearbeiten' }
         @{ T = 'i'; X = '**Alle / Keine / Nur Online markieren** und **Markierte aus Liste entfernen** stehen über der Tabelle.' }
         @{ T = 'i'; X = '**Hostname, Typ und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
@@ -1567,7 +1571,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Aufwecken** sitzt im Modul **WOL** (Menü Module > WOL), dort auch die Einrichtung von Wake-on-LAN.' }
         @{ T = 'h'; X = 'Neustart und Herunterfahren (per WinRM, nur bei Grün)' }
         @{ T = 'i'; X = '**Neustart / Herunterfahren:** fragt die Verzögerung in Sekunden ab (vorausgefüllt 60, 0 = sofort), danach eine Sicherheitsabfrage.' }
-        @{ T = 'i'; X = '**Neustart planen...:** Datum und Uhrzeit wählen (nach der Uhr des Zielgeräts). Auf dem Gerät entsteht die Aufgabe "WaToKiNeustart" (als SYSTEM). Benutzer erhalten 5 Minuten vorher einen Hinweis. Die Aufgabe läuft ohne das Cockpit. Nach dem Termin prüft das Cockpit, sobald das Gerät wieder grün ist, ob der Neustart stattgefunden hat.' }
+        @{ T = 'i'; X = '**Neustart planen...:** Datum und Uhrzeit wählen (nach der Uhr des Zielgeräts). Auf dem Gerät entsteht die Aufgabe "NetCockpitNeustart" (als SYSTEM). Benutzer erhalten 5 Minuten vorher einen Hinweis. Die Aufgabe läuft ohne das Cockpit. Nach dem Termin prüft das Cockpit, sobald das Gerät wieder grün ist, ob der Neustart stattgefunden hat.' }
         @{ T = 'i'; X = '**Neustart abbrechen:** löscht eine geplante Aufgabe und stoppt einen laufenden Neustart oder ein laufendes Herunterfahren (innerhalb der Verzögerung).' }
         @{ T = 'h'; X = 'Parallelität' }
         @{ T = 'p'; X = 'Aufträge an mehrere Geräte laufen höchstens so viele gleichzeitig, wie in Optionen > Einstellungen steht (Standard 10). Die übrigen Geräte warten in der Warteschlange; ihr Status zeigt "wartet".' }
@@ -1617,7 +1621,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Aufwecken (Modul WOL):** Wake-on-LAN im BIOS/UEFI und in der Netzwerkkarte aktiv, Gerät per Kabel, MAC der weckenden Netzwerkkarte.' }
         @{ T = 'i'; X = '**Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen:** WinRM (TCP 5985) und Administratorrechte auf dem Ziel, Windows-Geräte. **KuDo-Informationen bei Linux:** SSH (TCP 22), Posh-SSH und ein Benutzer mit Kennwort, kein Root nötig.' }
         @{ T = 'i'; X = '**OU wählen:** Rechner in der Domäne, kein RSAT nötig.' }
-        @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, die Skripte des Moduls WaToKi im Unterordner WaToKi.' }
+        @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
         @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
         @{ T = 'h'; X = 'Log' }
         @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
@@ -2202,7 +2206,7 @@ function Get-WolVorfahre {
 }
 
 ## Spalten
-### Spalte anlegen: Spaltenkopf mit Filterfeld (Teiltext, Groß-/Kleinschreibung egal; filtert nur die jeweilige Spalte), in die Spaltenliste eintragen; Spalten der Module (-Modul) stehen vor "Bemerkung", sind nur sichtbar, solange ein Modul der Gruppe offen ist, und werden nicht in den Einstellungen gespeichert
+### Spalte anlegen: Spaltenkopf mit Filterfeld (Teiltext, Groß-/Kleinschreibung egal; filtert nur die jeweilige Spalte), in die Spaltenliste eintragen; Spalten der Module (-Modul) stehen vor "Bemerkung", sind nur sichtbar, wenn im offenen Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist, und werden nicht in den Einstellungen gespeichert
 function New-WolSpalte {
     param(
         [string]$Key, [string]$Titel, [string]$Eig, [string]$Sort = '', $Breite = 120, $MinBreite = 40,
@@ -2278,24 +2282,42 @@ function Reset-WolSpalten {
     Save-WolEinstellungen
 }
 
-### Spalten der Module ein- oder ausblenden: sichtbar, solange ein Modul der Gruppe offen ist (Gruppe "Updates" = gemeinsame Spalten, sichtbar, solange irgendein Update-Modul offen ist; WaToKi zählt nicht dazu)
+### Spalten der Module ein- oder ausblenden: sichtbar, wenn im offenen Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist (Gruppe "Updates" = gemeinsame Spalten, sichtbar, sobald der Haken bei irgendeinem Modul außer WaToKi gesetzt ist)
 function Update-WolModulSpalten {
     foreach ($s in @($script:SpaltenListe | Where-Object { $_.Modul })) {
-        $offen = $(if ($s.Modul -eq 'Updates') { @($script:ModulOffen | Where-Object { $_ -ne 'WATOKI' }).Count -gt 0 } else { $script:ModulOffen.Contains([string]$s.Modul) })
-        Set-WolSpalteSichtbar -Key $s.Key -Sichtbar $offen -OhneSpeichern
+        $an = $(if ($s.Modul -eq 'Updates') { @($script:ModulSpaltenAn | Where-Object { $_ -ne 'WATOKI' }).Count -gt 0 } else { $script:ModulSpaltenAn.Contains([string]$s.Modul) })
+        Set-WolSpalteSichtbar -Key $s.Key -Sichtbar $an -OhneSpeichern
     }
 }
 
-### Meldet ein Modulfenster als geöffnet oder geschlossen und passt die Spalten an
+### Meldet ein Modulfenster als geöffnet oder geschlossen und passt die Spalten an (beim Schließen wird der Haken "Spalten anzeigen" zurückgesetzt)
 function Set-WolModulOffen {
     param([string]$Key, [bool]$Offen)
-    if ($Offen) { [void]$script:ModulOffen.Add($Key) } else { [void]$script:ModulOffen.Remove($Key) }
+    if ($Offen) { [void]$script:ModulOffen.Add($Key) } else { [void]$script:ModulOffen.Remove($Key); [void]$script:ModulSpaltenAn.Remove($Key) }
     Update-WolModulSpalten
     ### Beim Schließen eines Modulfensters das Cockpit nach vorn holen (sonst springt das PowerShell-Fenster hoch)
     if (-not $Offen -and $script:Fenster) {
         try { [void]$script:Fenster.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::ApplicationIdle, [Action]{ [void]$script:Fenster.Activate() }) }
         catch { }
     }
+}
+
+### Haken "Spalten des Moduls in der Tabelle anzeigen" eines Modulfensters: Spalten des Moduls ein- oder ausblenden
+function Set-WolModulSpalten {
+    param([string]$Key, [bool]$An)
+    if ($An) { [void]$script:ModulSpaltenAn.Add($Key) } else { [void]$script:ModulSpaltenAn.Remove($Key) }
+    Update-WolModulSpalten
+}
+
+### Haken eines Modulfensters (CheckBox ChkSpalten) verdrahten; er steht beim Öffnen immer auf aus und wird nicht gespeichert
+function Connect-WolModulSpaltenHaken {
+    param($Fenster, [string]$Key)
+    $haken = $Fenster.FindName('ChkSpalten')
+    if (-not $haken) { return }
+    $haken.Tag = $Key
+    $haken.IsChecked = $false
+    $haken.Add_Checked({ param($sender, $e) Set-WolModulSpalten -Key ([string]$sender.Tag) -An $true })
+    $haken.Add_Unchecked({ param($sender, $e) Set-WolModulSpalten -Key ([string]$sender.Tag) -An $false })
 }
 
 ### Auswahlmenü der Spalten (Rechtsklick auf die Spaltenüberschrift und Ansicht > Spalten) neu aufbauen
@@ -3770,7 +3792,7 @@ function Update-WolAuftraege {
 
 # Aufgaben auf dem Zielgerät
 ## Funktionen für die Jobs: Der Job lädt sie mit ". ([scriptblock]::Create($TaskCode))"; $Ic ist die Parameterliste für Invoke-Command (ComputerName, Credential, ErrorAction)
-### Aufgaben als SYSTEM ohne Trigger anlegen und starten, Status abfragen, auf das Ende warten, Reste entfernen; geplanter Neustart (Aufgabe WaToKiNeustart, Beschreibung = Zielzeit yyyy-MM-dd HH:mm, Hinweis 5 Minuten vorher); Windows-Version, letzter Neustart, Neustart ausstehend (gemeinsam für alle Update-Module)
+### Aufgaben als SYSTEM ohne Trigger anlegen und starten, Status abfragen, auf das Ende warten, Reste entfernen; geplanter Neustart (Aufgabe NetCockpitNeustart, Beschreibung = Zielzeit yyyy-MM-dd HH:mm, Hinweis 5 Minuten vorher); Windows-Version, letzter Neustart, Neustart ausstehend (gemeinsam für alle Update-Module)
 $script:ZielTaskCode = @'
 function Start-WolZielTask {
     param($Ic, [string]$Name, [string]$Skript, [string]$Programm = 'powershell.exe')
@@ -3816,7 +3838,7 @@ function Get-WolZielAnderesTool {
     param($Ic, [string]$Eigene)
     Invoke-Command @Ic -ArgumentList $Eigene -ScriptBlock {
         param($e)
-        @(Get-ScheduledTask -TaskName 'WaToKi*' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -notlike $e -and $_.TaskName -ne 'WaToKiNeustart' -and [string]$_.State -in 'Running', 'Queued' } | ForEach-Object { [string]$_.TaskName })
+        @(Get-ScheduledTask -TaskName 'NetCockpit*' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -notlike $e -and $_.TaskName -ne 'NetCockpitNeustart' -and [string]$_.State -in 'Running', 'Queued' } | ForEach-Object { [string]$_.TaskName })
     }
 }
 
@@ -3836,17 +3858,17 @@ function Set-WolZielNeustart {
         $skript = @(
             ('shutdown.exe /r /t ' + $sek + ' /c "' + $text + '"'),
             'Start-Sleep -Seconds 5',
-            "Unregister-ScheduledTask -TaskName 'WaToKiNeustart' -Confirm:`$false -ErrorAction SilentlyContinue",
-            "Remove-Item -Path 'C:\Windows\Temp\WaToKiNeustart.ps1' -Force -ErrorAction SilentlyContinue"
+            "Unregister-ScheduledTask -TaskName 'NetCockpitNeustart' -Confirm:`$false -ErrorAction SilentlyContinue",
+            "Remove-Item -Path 'C:\Windows\Temp\NetCockpitNeustart.ps1' -Force -ErrorAction SilentlyContinue"
         ) -join "`r`n"
-        Unregister-ScheduledTask -TaskName 'WaToKiNeustart' -Confirm:$false -ErrorAction SilentlyContinue
-        $pfad = 'C:\Windows\Temp\WaToKiNeustart.ps1'
+        Unregister-ScheduledTask -TaskName 'NetCockpitNeustart' -Confirm:$false -ErrorAction SilentlyContinue
+        $pfad = 'C:\Windows\Temp\NetCockpitNeustart.ps1'
         Set-Content -Path $pfad -Value $skript -Encoding UTF8
         $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $pfad + '"')
         $tr = New-ScheduledTaskTrigger -Once -At $start
         $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $einst = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
-        Register-ScheduledTask -TaskName 'WaToKiNeustart' -Action $a -Trigger $tr -Principal $p -Settings $einst -Description $ziel.ToString('yyyy-MM-dd HH:mm') -Force | Out-Null
+        Register-ScheduledTask -TaskName 'NetCockpitNeustart' -Action $a -Trigger $tr -Principal $p -Settings $einst -Description $ziel.ToString('yyyy-MM-dd HH:mm') -Force | Out-Null
         $ziel.ToString('yyyy-MM-dd HH:mm')
     }
 }
@@ -3855,11 +3877,11 @@ function Remove-WolZielNeustart {
     param($Ic)
     Invoke-Command @Ic -ScriptBlock {
         $geloescht = $false
-        if (Get-ScheduledTask -TaskName 'WaToKiNeustart' -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName 'WaToKiNeustart' -Confirm:$false
+        if (Get-ScheduledTask -TaskName 'NetCockpitNeustart' -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName 'NetCockpitNeustart' -Confirm:$false
             $geloescht = $true
         }
-        Remove-Item -Path 'C:\Windows\Temp\WaToKiNeustart.ps1' -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path 'C:\Windows\Temp\NetCockpitNeustart.ps1' -Force -ErrorAction SilentlyContinue
         $null = shutdown.exe /a 2>&1
         [pscustomobject]@{ TaskGeloescht = $geloescht; AbbruchCode = $LASTEXITCODE }
     }
@@ -3868,13 +3890,13 @@ function Remove-WolZielNeustart {
 function Get-WolZielNeustart {
     param($Ic)
     $zielText = Invoke-Command @Ic -ScriptBlock {
-        $t = Get-ScheduledTask -TaskName 'WaToKiNeustart' -ErrorAction SilentlyContinue
+        $t = Get-ScheduledTask -TaskName 'NetCockpitNeustart' -ErrorAction SilentlyContinue
         if (-not $t) { return $null }
         $ziel = [datetime]::MinValue
         if (-not [datetime]::TryParseExact([string]$t.Description, 'yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$ziel)) { return $null }
         if ($ziel -lt (Get-Date).AddMinutes(-10)) {
-            Unregister-ScheduledTask -TaskName 'WaToKiNeustart' -Confirm:$false -ErrorAction SilentlyContinue
-            Remove-Item -Path 'C:\Windows\Temp\WaToKiNeustart.ps1' -Force -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName 'NetCockpitNeustart' -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-Item -Path 'C:\Windows\Temp\NetCockpitNeustart.ps1' -Force -ErrorAction SilentlyContinue
             return $null
         }
         return $ziel.ToString('yyyy-MM-dd HH:mm')
@@ -3888,7 +3910,7 @@ function Get-WolZielNeustartPruefung {
         $os = Get-CimInstance -ClassName Win32_OperatingSystem
         [pscustomobject]@{
             Boot = $os.LastBootUpTime.ToString('yyyy-MM-dd HH:mm')
-            Task = [bool](Get-ScheduledTask -TaskName 'WaToKiNeustart' -ErrorAction SilentlyContinue)
+            Task = [bool](Get-ScheduledTask -TaskName 'NetCockpitNeustart' -ErrorAction SilentlyContinue)
         }
     }
 }
@@ -4250,12 +4272,145 @@ $script:DnsFertig = {
 }
 
 # Module
-## Modul beim ersten Aufruf nachladen (Dot-Sourcing); das Modul legt seine Funktionen mit "function script:Name" an, trägt eigene Spalten über New-WolSpalte ein und stellt Show-WolModul<Schlüssel> bereit
+## Block (Thread-Job): Dateien über den Proxy holen und jede gegen ihre .sig-Datei prüfen; gibt nur bei gültigen Signaturen Bytes zurück
+$script:NachladeBlock = {
+    param([string]$Base, [string]$Schluessel, [string]$PfadText, [string]$RepoOrdner, $Fortschritt)
+    $ProgressPreference = 'SilentlyContinue'
+
+    function Get-NcBytes {
+        param([string]$P)
+        $adresse = '{0}?path={1}' -f $Base, [uri]::EscapeDataString($P)
+        $antwort = Invoke-WebRequest -Uri $adresse
+        return , [byte[]]$antwort.RawContentStream.ToArray()
+    }
+
+    ### Datei holen und gegen ihre .sig-Datei prüfen (ohne gültige Signatur wird abgebrochen)
+    function Get-NcGeprueft {
+        param([string]$P)
+        $Fortschritt.Text = [System.IO.Path]::GetFileName($P)
+        $inhalt = Get-NcBytes -P $P
+        try {
+            $sigText = [System.Text.Encoding]::UTF8.GetString((Get-NcBytes -P "$P.sig")).Trim()
+            $sigBytes = [Convert]::FromBase64String($sigText)
+        }
+        catch {
+            throw "Zu '$P' gibt es keine gültige Signaturdatei. Die Datei wird nicht geladen."
+        }
+        $pruefer = [System.Security.Cryptography.ECDsa]::Create()
+        try {
+            $gelesen = 0
+            $pruefer.ImportSubjectPublicKeyInfo([Convert]::FromBase64String($Schluessel), [ref]$gelesen)
+            $gueltig = $pruefer.VerifyData($inhalt, $sigBytes, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+        }
+        finally {
+            $pruefer.Dispose()
+        }
+        if (-not $gueltig) {
+            throw "Die Signatur von '$P' ist ungültig. Die Datei wird nicht geladen."
+        }
+        $Fortschritt.Aktuell = $Fortschritt.Aktuell + 1
+        return , $inhalt
+    }
+
+    $alle = [System.Collections.Generic.List[string]]::new()
+    foreach ($p in @($PfadText.Split('|'))) { if ($p) { $alle.Add($p) } }
+    if ($RepoOrdner) {
+        $liste = Invoke-RestMethod -Uri ('{0}?path={1}' -f $Base, [uri]::EscapeDataString($RepoOrdner))
+        foreach ($e in @($liste | Where-Object { $_.type -eq 'file' -and $_.name -like '*.ps1' })) { $alle.Add([string]$e.path) }
+    }
+    $Fortschritt.Gesamt = $alle.Count
+    $ergebnis = [System.Collections.Generic.List[object]]::new()
+    foreach ($p in $alle) {
+        $ergebnis.Add([pscustomobject]@{ Name = [System.IO.Path]::GetFileName($p); Bytes = (Get-NcGeprueft -P $p) })
+    }
+    [pscustomobject]@{ Dateien = @($ergebnis.ToArray()) }
+}
+
+## Dateien vom Server holen (Ladefenster mit Fortschrittsbalken), prüfen und in den Zielordner schreiben: einzelne Repo-Pfade und/oder alle .ps1-Dateien eines Repo-Ordners; $true, wenn mindestens eine Datei geschrieben wurde
+function Install-WolNachladen {
+    param([string]$Titel, [string[]]$Pfade = @(), [string]$RepoOrdner = '', [string]$ZielOrdner)
+    $script:NlFortschritt = [hashtable]::Synchronized(@{ Aktuell = 0; Gesamt = 0; Text = 'Verbinde mit dem Server ...' })
+    $script:NlErgebnis = $null
+    $script:NlFehler = ''
+    $f = New-WolFenster @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NET-COCKPIT" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Topmost="True"
+        Background="White" FontFamily="Segoe UI">
+  <StackPanel Margin="24">
+    <TextBlock x:Name="TxtHinweis" Text="" FontSize="16" FontWeight="SemiBold" Foreground="#0078D4" TextWrapping="Wrap"/>
+    <ProgressBar x:Name="Balken" Height="12" Margin="0,14,0,0" IsIndeterminate="True" Minimum="0" Maximum="1"/>
+    <TextBlock x:Name="TxtDatei" Text="" FontSize="12" Foreground="DimGray" Margin="0,8,0,0" TextWrapping="Wrap"/>
+  </StackPanel>
+</Window>
+'@
+    $script:NlFenster = $f
+    $script:NlC = @{ Balken = $f.FindName('Balken'); Datei = $f.FindName('TxtDatei') }
+    $f.FindName('TxtHinweis').Text = $Titel
+    if ($script:Fenster -and $script:Fenster.IsVisible) {
+        $f.Owner = $script:Fenster
+        $f.WindowStartupLocation = 'CenterOwner'
+    }
+    $script:NlJob = Start-ThreadJob -ScriptBlock $script:NachladeBlock -ArgumentList $script:ServerBasis, $script:ServerSchluessel, ($Pfade -join '|'), $RepoOrdner, $script:NlFortschritt
+    $script:NlTimer = [System.Windows.Threading.DispatcherTimer]::new()
+    $script:NlTimer.Interval = [TimeSpan]::FromMilliseconds(100)
+    $script:NlTimer.Add_Tick({
+        $gesamt = [int]$script:NlFortschritt.Gesamt
+        if ($gesamt -gt 0) {
+            $aktuell = [int]$script:NlFortschritt.Aktuell
+            $script:NlC.Balken.IsIndeterminate = $false
+            $script:NlC.Balken.Maximum = $gesamt
+            $script:NlC.Balken.Value = $aktuell
+            $script:NlC.Datei.Text = ('Datei {0} von {1}: {2}' -f ([Math]::Min($aktuell + 1, $gesamt)), $gesamt, $script:NlFortschritt.Text)
+        }
+        else {
+            $script:NlC.Datei.Text = [string]$script:NlFortschritt.Text
+        }
+        if ($script:NlJob.State -notin 'Completed', 'Failed', 'Stopped') { return }
+        $script:NlTimer.Stop()
+        try { $script:NlErgebnis = @(Receive-Job -Job $script:NlJob -ErrorAction Stop) | Select-Object -Last 1 }
+        catch { $script:NlFehler = $_.Exception.Message }
+        $script:NlFenster.Close()
+    })
+    $script:NlTimer.Start()
+    [void]$f.ShowDialog()
+    $script:NlTimer.Stop()
+    if ($script:NlJob) {
+        Stop-Job -Job $script:NlJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $script:NlJob -Force -ErrorAction SilentlyContinue
+        $script:NlJob = $null
+    }
+    if ($script:NlFehler) {
+        Write-WolLog "Nachladen fehlgeschlagen ($Titel): $($script:NlFehler)"
+        Show-WolMeldung "Das Laden vom Server hat nicht geklappt:`r`n$($script:NlFehler)" 'Warning'
+        return $false
+    }
+    if (-not $script:NlErgebnis -or @($script:NlErgebnis.Dateien).Count -eq 0) { return $false }
+    try {
+        if (-not (Test-Path -LiteralPath $ZielOrdner)) { [void](New-Item -Path $ZielOrdner -ItemType Directory -Force) }
+        foreach ($d in @($script:NlErgebnis.Dateien)) {
+            [System.IO.File]::WriteAllBytes((Join-Path $ZielOrdner $d.Name), [byte[]]$d.Bytes)
+        }
+    }
+    catch {
+        Write-WolLog "Nachladen: Datei konnte nicht gespeichert werden: $($_.Exception.Message)"
+        Show-WolMeldung "Die geladenen Dateien konnten nicht gespeichert werden:`r`n$($_.Exception.Message)" 'Warning'
+        return $false
+    }
+    Write-WolLog "Vom Server geladen: $(@($script:NlErgebnis.Dateien).Count) Datei(en) für '$Titel'"
+    return $true
+}
+
+## Modul beim ersten Aufruf nachladen (Dot-Sourcing); das Modul legt seine Funktionen mit "function script:Name" an, trägt eigene Spalten über New-WolSpalte ein und stellt Show-WolModul<Schlüssel> bereit; fehlt die Datei und kennt das Cockpit den Server (Start über start.ps1), holt es sie vorher mit Ladefenster
 function Open-WolModul {
     param([string]$Key)
     $m = $script:Module[$Key]
     if (-not $m.Geladen) {
         $pfad = $(if ($script:ModulOrdner) { Join-Path $script:ModulOrdner $m.Datei } else { '' })
+        if ($pfad -and -not (Test-Path -LiteralPath $pfad) -and $script:ServerBasis -and $script:ServerSchluessel) {
+            if (-not (Install-WolNachladen -Titel "Modul $($m.Name) wird gestartet" -Pfade @($m.Datei) -ZielOrdner $script:ModulOrdner)) { return }
+        }
         if (-not $pfad -or -not (Test-Path -LiteralPath $pfad)) {
             Show-WolMeldung "Das Modul $($m.Name) wurde nicht gefunden.`r`nErwartet wird die Datei $($m.Datei) im selben Ordner wie das NET-COCKPIT." 'Warning'
             return

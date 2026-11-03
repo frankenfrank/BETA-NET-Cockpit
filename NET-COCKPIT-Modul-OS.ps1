@@ -19,7 +19,7 @@ $script:OsLogOrdner = Join-Path $script:DatenOrdner 'Modul-OS'
 $script:OsSync = [System.Collections.Generic.Dictionary[object, object]]::new()
 $script:OsFenster = $null
 
-## Spalten (nur sichtbar, solange das Modulfenster offen ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
+## Spalten (nur sichtbar, wenn im Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
 New-WolSpalte -Key 'Windows' -Titel 'Windows' -Eig '[Windows]' -Breite 270 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'NeustartAusstehend' -Titel 'Neustart ausstehend' -Eig '[NeustartAusstehend]' -Breite 125 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'LetzterNeustart' -Titel 'Letzter Neustart' -Eig '[LetzterNeustart]' -Breite 125 -Sichtbar $false -Modul 'Updates'
@@ -30,7 +30,7 @@ New-WolSpalte -Key 'OsLetzte' -Titel 'Letzte Updates' -Eig '[OsLetzte]' -Breite 
 # Skripte, die auf dem Zielgerät als geplante Aufgabe laufen (Windows PowerShell 5.1, als SYSTEM)
 ## Installation ohne Neustart
 $script:OsInstallSkript = @'
-$log = 'C:\Windows\Temp\WaToKiOsInstall.log'
+$log = 'C:\Windows\Temp\NetCockpitOsInstall.log'
 try {
     Import-Module PSWindowsUpdate -ErrorAction Stop
     Install-WindowsUpdate -AcceptAll -IgnoreReboot -Confirm:$false -Verbose *>&1 | Out-File -FilePath $log -Encoding utf8 -Width 250
@@ -56,7 +56,7 @@ else {
 
 ## Suche: verfügbare Updates und Update-Verlauf aus der Windows-Update-Historie
 $script:OsSuchSkript = @'
-$out = 'C:\Windows\Temp\WaToKiOsSuche.json'
+$out = 'C:\Windows\Temp\NetCockpitOsSuche.json'
 try {
     Import-Module PSWindowsUpdate -ErrorAction Stop
 
@@ -253,21 +253,21 @@ $script:OsBlock = {
                 }
                 Write-Log 'PSWindowsUpdate ist vorhanden'
 
-                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiOs*')
+                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitOs*')
                 if ($fremd.Count -gt 0) {
-                    $S.Status = "Anderes WaToKi-Tool läuft auf dem Gerät$zusatz"
-                    Write-Log "Anderes WaToKi-Tool läuft auf dem Gerät: $($fremd -join ', ')"
+                    $S.Status = "Anderes NET-COCKPIT-Tool läuft auf dem Gerät$zusatz"
+                    Write-Log "Anderes NET-COCKPIT-Tool läuft auf dem Gerät: $($fremd -join ', ')"
                     return
                 }
 
-                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'WaToKiOsInstall'
+                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'NetCockpitOsInstall'
                 if ($inst.Vorhanden -and $inst.State -in 'Running', 'Queued') {
                     $S.Status = "Installation läuft bereits auf dem Gerät$zusatz"
                     Write-Log 'Installation läuft bereits auf dem Gerät'
                     return
                 }
 
-                $res = Invoke-Abfrage -Name 'WaToKiOsSuche' -Skript $Skripte.Suche -Wort 'Suche'
+                $res = Invoke-Abfrage -Name 'NetCockpitOsSuche' -Skript $Skripte.Suche -Wort 'Suche'
                 if (-not $res) { return }
 
                 ### Verfügbare Updates
@@ -312,14 +312,14 @@ $script:OsBlock = {
 
                 $mitNeustart = ($Aktion -eq 'InstallierenNeustart')
                 $skript = if ($mitNeustart) { $Skripte.InstallNeustart } else { $Skripte.Install }
-                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiOs*')
+                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitOs*')
                 if ($fremd.Count -gt 0) {
-                    $S.Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'
-                    Write-Log "Anderes WaToKi-Tool läuft auf dem Gerät: $($fremd -join ', ')"
+                    $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
+                    Write-Log "Anderes NET-COCKPIT-Tool läuft auf dem Gerät: $($fremd -join ', ')"
                     return
                 }
 
-                $name = 'WaToKiOsInstall'
+                $name = 'NetCockpitOsInstall'
                 $aufraeumen = $true
                 $zeile = { param($t) if ($t.Trim()) { Write-Log $t.TrimEnd() } }
                 try {
@@ -619,6 +619,8 @@ function script:Show-WolModulOS {
         Title="OS-Updates" Width="400" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
   <StackPanel Margin="14">
     <TextBlock Text="Wirkt auf die markierten Geräte der Tabelle (nur grüne, WinRM erreichbar). Aufträge laufen über die Warteschlange des NET-COCKPIT." TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,12"/>
+    <CheckBox x:Name="ChkSpalten" Content="Spalten des Moduls in der Tabelle anzeigen" Margin="0,0,0,10"
+              ToolTip="Blendet die Spalten dieses Moduls in der Tabelle ein (Standard: aus). Beim Schließen des Fensters werden sie wieder ausgeblendet"/>
     <Button x:Name="BtnStatus" Content="Status prüfen" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Prüft Windows-Version, letzten Neustart, ausstehenden und geplanten Neustart und das Modul PSWindowsUpdate, sucht Updates und liest den Update-Verlauf"/>
     <Button x:Name="BtnInstall" Content="Updates installieren" Padding="10,5" Margin="0,0,0,6"
@@ -634,6 +636,7 @@ function script:Show-WolModulOS {
 </Window>
 '@
     $f.Owner = $script:Fenster
+    Connect-WolModulSpaltenHaken -Fenster $f -Key 'OS'
     $f.FindName('BtnStatus').Add_Click({ Start-WolOsStatus })
     $f.FindName('BtnInstall').Add_Click({ Start-WolOsInstallieren })
     $f.FindName('BtnInstallNeu').Add_Click({ Start-WolOsInstallierenNeustart })
@@ -664,9 +667,9 @@ $script:ModulInfo['OS'] = {
         @{ T = 'i'; X = '**Update-Modul nachinstallieren:** PSWindowsUpdate auf Geräten, wo es fehlt. Danach läuft automatisch Status prüfen für dieses Gerät.' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Update-Verlauf ohne Defender-Definitionen bei "Letzte Updates" (letzte 50 Einträge) und das Log dieses Geräts.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, Update-Modul, OS-Updates und Letzte Updates sind nur sichtbar, solange dieses Modulfenster offen ist (Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, Update-Modul, OS-Updates und Letzte Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
         @{ T = 'i'; X = '**Suche und Installation** laufen als kurze geplante Aufgabe (SYSTEM, ohne Trigger) auf dem Gerät, weil Windows das aus einer Remote-Sitzung nicht erlaubt. Sie wird nach dem Ende gelöscht. Läuft schon eine Installation, hängt sich das Cockpit an die laufende an. Wird das Cockpit währenddessen beendet, läuft sie auf dem Gerät weiter.' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit APP- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes WaToKi-Tool auf dem Gerät, steht "Anderes WaToKi-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit APP- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
         @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-OS\yyyyMMdd_Gerät_os-log.txt, im Detailfenster der Reiter Log.' }
         @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version und Update-Modul bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und die Anzahl der Updates werden nicht gespeichert.' }
         @{ T = 'w'; X = 'Noch nicht getestet: Clients und die Uhrzeit-Umrechnung im Update-Verlauf.' }

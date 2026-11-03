@@ -18,7 +18,7 @@
 ## Zustand
 $script:WolFenster = $null
 
-## Spalten (nur sichtbar, solange das Modulfenster offen ist)
+## Spalten (nur sichtbar, wenn im Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist)
 New-WolSpalte -Key 'WolGeraet' -Titel 'Gerät (BIOS-Angabe)' -Eig '[WolGeraet]' -Breite 200 -Sichtbar $false -Modul 'WOL'
 New-WolSpalte -Key 'WolKarte' -Titel 'WoL Netzwerkkarte' -Eig '[WolKarte]' -Breite 200 -Sichtbar $false -Modul 'WOL'
 New-WolSpalte -Key 'WolSchnellstart' -Titel 'Schnellstart' -Eig '[WolSchnellstart]' -Breite 90 -Sichtbar $false -Modul 'WOL'
@@ -211,7 +211,7 @@ elseif ($hersteller -match 'LENOVO') {
 
 ## Aufgabe auf dem Zielgerät (PowerShell 7, als SYSTEM): Dell Command | Configure per WinGet installieren
 $script:WolToolSkript = @'
-$log = 'C:\Windows\Temp\WaToKiWolTool.log'
+$log = 'C:\Windows\Temp\NetCockpitWolTool.log'
 try {
     Import-Module Microsoft.WinGet.Client -ErrorAction Stop
     Add-Content -Path $log -Encoding utf8 -Value 'Installiere Dell.CommandConfigure'
@@ -265,10 +265,10 @@ $script:WolBlock = {
             if (-not ($info.PS7 -and $info.Modul)) {
                 return [pscustomobject]@{ Erfolg = $true; Fehler = ''; Status = 'PowerShell 7 oder WinGet-Modul fehlt (APP-Modul: WinGet-Modul nachinstallieren)'; Meldungen = @(); Daten = $null }
             }
-            $name = 'WaToKiWolTool'
-            $andere = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiWol*')
+            $name = 'NetCockpitWolTool'
+            $andere = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitWol*')
             if ($andere.Count -gt 0) {
-                return [pscustomobject]@{ Erfolg = $true; Fehler = ''; Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'; Meldungen = @(); Daten = $null }
+                return [pscustomobject]@{ Erfolg = $true; Fehler = ''; Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'; Meldungen = @(); Daten = $null }
             }
             $aufraeumen = $true
             try {
@@ -512,6 +512,8 @@ function script:Show-WolModulWOL {
         Title="WOL" Width="400" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
   <StackPanel Margin="14">
     <TextBlock Text="Wirkt auf die markierten Geräte der Tabelle. Status, Tool und Aktivieren brauchen WinRM (grüne Geräte), Aufwecken nur die MAC-Adresse." TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,12"/>
+    <CheckBox x:Name="ChkSpalten" Content="Spalten des Moduls in der Tabelle anzeigen" Margin="0,0,0,10"
+              ToolTip="Blendet die Spalten dieses Moduls in der Tabelle ein (Standard: aus). Beim Schließen des Fensters werden sie wieder ausgeblendet"/>
     <Button x:Name="BtnStatus" Content="Status prüfen" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Zeigt Hersteller und Modell, Wake-on-LAN der Netzwerkkarte, Schnellstart und Wake-on-LAN im BIOS (Dell, HP, Lenovo)"/>
     <Button x:Name="BtnTool" Content="Tool nachinstallieren (Dell)" Padding="10,5" Margin="0,0,0,6"
@@ -527,6 +529,7 @@ function script:Show-WolModulWOL {
 </Window>
 '@
     $f.Owner = $script:Fenster
+    Connect-WolModulSpaltenHaken -Fenster $f -Key 'WOL'
     $f.FindName('BtnStatus').Add_Click({ Start-WolWolStatus })
     $f.FindName('BtnTool').Add_Click({ Start-WolWolTool })
     $f.FindName('BtnAktivieren').Add_Click({ Start-WolWolAktivieren })
@@ -560,7 +563,7 @@ $script:ModulInfo['WOL'] = {
         @{ T = 'i'; X = '**Lenovo:** über WMI (root\wmi, Lenovo_BiosSetting, Einstellung "Wake On LAN") mit anschließendem Speichern.' }
         @{ T = 'i'; X = '**Andere Hersteller:** werden nicht unterstützt, das BIOS bleibt unverändert.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS sind nur sichtbar, solange dieses Modulfenster offen ist.' }
+        @{ T = 'i'; X = '**Spalten:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus).' }
         @{ T = 'i'; X = '**Netzwerkkarte:** Die Änderung läuft ohne Neustart der Karte. Greift sie nicht, hilft ein Neustart des Geräts.' }
         @{ T = 'i'; X = '**BIOS-Kennwort:** Ist eines gesetzt, kann das BIOS nicht geändert werden, das Log nennt den Rückgabewert.' }
         @{ T = 'i'; X = '**Nicht gesetzt oder nicht prüfbar:** Manche BIOS-Versionen haben zusätzliche Optionen für den ausgeschalteten Zustand (zum Beispiel Deep Sleep bei Dell). Diese ändert das Modul nicht.' }

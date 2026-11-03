@@ -21,7 +21,7 @@ $script:TrSync = [System.Collections.Generic.Dictionary[object, object]]::new()
 $script:TrFenster = $null
 $script:TrChkBios = $null
 
-## Spalten (nur sichtbar, solange das Modulfenster offen ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
+## Spalten (nur sichtbar, wenn im Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
 New-WolSpalte -Key 'Windows' -Titel 'Windows' -Eig '[Windows]' -Breite 270 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'NeustartAusstehend' -Titel 'Neustart ausstehend' -Eig '[NeustartAusstehend]' -Breite 125 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'LetzterNeustart' -Titel 'Letzter Neustart' -Eig '[LetzterNeustart]' -Breite 125 -Sichtbar $false -Modul 'Updates'
@@ -35,10 +35,11 @@ New-WolSpalte -Key 'TrUpdates' -Titel 'Treiber-Updates' -Eig '[TrUpdates]' -Brei
 ## Gemeinsame Bibliothek (Herstellererkennung, Suche und Installation je Hersteller)
 $script:TrLib = @'
 $mitBios       = __MITBIOS__
-$ordnerDaten   = 'C:\ProgramData\WaToKi'
-$verlaufDatei  = 'C:\ProgramData\WaToKi\TreiberVerlauf.csv'
-$toolLogDatei  = 'C:\ProgramData\WaToKi\TreiberToolLog.txt'
-$hpiaOrdner    = 'C:\ProgramData\WaToKi\HPIA'
+if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
+$ordnerDaten   = 'C:\ProgramData\NET-COCKPIT'
+$verlaufDatei  = 'C:\ProgramData\NET-COCKPIT\TreiberVerlauf.csv'
+$toolLogDatei  = 'C:\ProgramData\NET-COCKPIT\TreiberToolLog.txt'
+$hpiaOrdner    = 'C:\ProgramData\NET-COCKPIT\HPIA'
 
 if (-not (Test-Path -Path $ordnerDaten)) { New-Item -ItemType Directory -Path $ordnerDaten -Force | Out-Null }
 if ((Test-Path -Path $toolLogDatei) -and ((Get-Item -Path $toolLogDatei).Length -gt 1MB)) {
@@ -188,7 +189,7 @@ function Get-ListeDell {
 function Get-ListeHP {
     $hpia = Get-HpiaPfad
     if (-not $hpia) { return [pscustomobject]@{ Fehler = 'HP Image Assistant fehlt'; Liste = @(); Roh = $null } }
-    $ordner = 'C:\Windows\Temp\WaToKiTreiberHpiaReport'
+    $ordner = 'C:\Windows\Temp\NetCockpitTreiberHpiaReport'
     if (Test-Path -Path $ordner) { Remove-Item -Path $ordner -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $ordner -Force | Out-Null
     $kat = if ($mitBios) { 'Drivers,Firmware,BIOS' } else { 'Drivers' }
@@ -299,8 +300,8 @@ function Install-TreiberDell {
 ### HP: Installation per HP Image Assistant (kein automatischer Neustart durch das Cockpit)
 function Install-TreiberHP {
     $hpia = Get-HpiaPfad
-    $ordner = 'C:\Windows\Temp\WaToKiTreiberHpiaReport'
-    $laden  = 'C:\Windows\Temp\WaToKiTreiberHpiaDownload'
+    $ordner = 'C:\Windows\Temp\NetCockpitTreiberHpiaReport'
+    $laden  = 'C:\Windows\Temp\NetCockpitTreiberHpiaDownload'
     if (Test-Path -Path $ordner) { Remove-Item -Path $ordner -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $ordner -Force | Out-Null
     New-Item -ItemType Directory -Path $laden -Force | Out-Null
@@ -346,8 +347,8 @@ function Install-TreiberLenovo {
 
 ## Suche (Liste, Verlauf und Tool-Log als JSON)
 $script:TrSuchHaupt = @'
-$out = 'C:\Windows\Temp\WaToKiTreiberSuche.json'
-$log = 'C:\Windows\Temp\WaToKiTreiberSuche.log'
+$out = 'C:\Windows\Temp\NetCockpitTreiberSuche.json'
+$log = 'C:\Windows\Temp\NetCockpitTreiberSuche.log'
 try {
     $info = Get-HerstellerInfo
     $r = Get-TreiberListe -Hersteller $info.Hersteller
@@ -385,7 +386,7 @@ $erg | ConvertTo-Json -Depth 4 | Set-Content -Path $out -Encoding UTF8
 
 ## Installation (kein automatischer Neustart)
 $script:TrInstallHaupt = @'
-$log = 'C:\Windows\Temp\WaToKiTreiberInstall.log'
+$log = 'C:\Windows\Temp\NetCockpitTreiberInstall.log'
 $fehlerAnzahl = 0
 try {
     $info = Get-HerstellerInfo
@@ -430,7 +431,7 @@ if ($fehlerAnzahl -gt 0) { exit 1 }
 
 ## Nachinstallation des Treiber-Tools je Hersteller
 $script:TrToolHaupt = @'
-$log = 'C:\Windows\Temp\WaToKiTreiberTool.log'
+$log = 'C:\Windows\Temp\NetCockpitTreiberTool.log'
 try {
     $info = Get-HerstellerInfo
     Write-Zeile ("Hersteller: {0}, Modell: {1}" -f $info.Hersteller, $info.Modell)
@@ -594,9 +595,10 @@ $script:TrBlock = {
         param([string]$Hersteller)
         $hat = Invoke-Command @ic -ArgumentList $Hersteller -ScriptBlock {
             param($h)
+            if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
             switch ($h) {
                 'Dell'   { return [bool](@("$env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe", "${env:ProgramFiles(x86)}\Dell\CommandUpdate\dcu-cli.exe") | Where-Object { Test-Path -Path $_ }) }
-                'HP'     { return [bool](Get-ChildItem -Path 'C:\ProgramData\WaToKi\HPIA' -Recurse -Filter 'HPImageAssistant.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) }
+                'HP'     { return [bool](Get-ChildItem -Path 'C:\ProgramData\NET-COCKPIT\HPIA' -Recurse -Filter 'HPImageAssistant.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) }
                 'Lenovo' { return [bool](Get-Module -ListAvailable -Name LSUClient) }
                 default  { return $false }
             }
@@ -699,21 +701,21 @@ $script:TrBlock = {
                 }
                 Write-Log "Treiber-Tool für $($info.Hersteller) ist vorhanden"
 
-                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiTreiber*')
+                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitTreiber*')
                 if ($fremd.Count -gt 0) {
-                    $S.Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'
-                    Write-Log "Anderes WaToKi-Tool läuft auf dem Gerät: $($fremd -join ', ')"
+                    $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
+                    Write-Log "Anderes NET-COCKPIT-Tool läuft auf dem Gerät: $($fremd -join ', ')"
                     return
                 }
 
-                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'WaToKiTreiberInstall'
+                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'NetCockpitTreiberInstall'
                 if ($inst.Vorhanden -and $inst.State -in 'Running', 'Queued') {
                     $S.Status = "Installation läuft bereits auf dem Gerät$zusatz"
                     Write-Log 'Installation läuft bereits auf dem Gerät'
                     return
                 }
 
-                $name = 'WaToKiTreiberSuche'
+                $name = 'NetCockpitTreiberSuche'
                 $aufraeumen = $true
                 try {
                     $S.Status = 'Suche läuft...'
@@ -726,7 +728,7 @@ $script:TrBlock = {
                     if ($w.Ergebnis -eq 'Zeit') { $S.Status = 'Suche: Zeitüberschreitung (30 Min)'; Write-Log $S.Status; return }
 
                     $json = Invoke-Command @ic -ScriptBlock {
-                        $f = 'C:\Windows\Temp\WaToKiTreiberSuche.json'
+                        $f = 'C:\Windows\Temp\NetCockpitTreiberSuche.json'
                         if (Test-Path $f) { Get-Content -Path $f -Raw -Encoding UTF8 }
                     }
                     if (-not $json) {
@@ -788,14 +790,14 @@ $script:TrBlock = {
                     return
                 }
 
-                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiTreiber*')
+                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitTreiber*')
                 if ($fremd.Count -gt 0) {
-                    $S.Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'
-                    Write-Log "Anderes WaToKi-Tool läuft auf dem Gerät: $($fremd -join ', ')"
+                    $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
+                    Write-Log "Anderes NET-COCKPIT-Tool läuft auf dem Gerät: $($fremd -join ', ')"
                     return
                 }
 
-                $name = 'WaToKiTreiberTool'
+                $name = 'NetCockpitTreiberTool'
                 $aufraeumen = $true
                 try {
                     $S.Status = 'Installiere Treiber-Tool...'
@@ -853,14 +855,14 @@ $script:TrBlock = {
                     return
                 }
 
-                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiTreiber*')
+                $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitTreiber*')
                 if ($fremd.Count -gt 0) {
-                    $S.Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'
-                    Write-Log "Anderes WaToKi-Tool läuft auf dem Gerät: $($fremd -join ', ')"
+                    $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
+                    Write-Log "Anderes NET-COCKPIT-Tool läuft auf dem Gerät: $($fremd -join ', ')"
                     return
                 }
 
-                $name = 'WaToKiTreiberInstall'
+                $name = 'NetCockpitTreiberInstall'
                 $aufraeumen = $true
                 $S.Marker = $false
                 try {
@@ -1192,6 +1194,8 @@ function script:Show-WolModulTREIBER {
         Title="TREIBER-Updates" Width="400" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
   <StackPanel Margin="14">
     <TextBlock Text="Wirkt auf die markierten Geräte der Tabelle (nur grüne, WinRM erreichbar). Aufträge laufen über die Warteschlange des NET-COCKPIT. Unterstützt: Dell, HP, Lenovo." TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,12"/>
+    <CheckBox x:Name="ChkSpalten" Content="Spalten des Moduls in der Tabelle anzeigen" Margin="0,0,0,10"
+              ToolTip="Blendet die Spalten dieses Moduls in der Tabelle ein (Standard: aus). Beim Schließen des Fensters werden sie wieder ausgeblendet"/>
     <Button x:Name="BtnStatus" Content="Status prüfen" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Prüft PC-Hersteller und Modell, Windows-Version, Neustart, Akku und Treiber-Tool, sucht Treiber-Updates und liest den Verlauf"/>
     <Button x:Name="BtnInstall" Content="Treiber-Updates installieren" Padding="10,5" Margin="0,0,0,6"
@@ -1208,6 +1212,7 @@ function script:Show-WolModulTREIBER {
 '@
     $f.Owner = $script:Fenster
     $script:TrChkBios = $f.FindName('ChkBios')
+    Connect-WolModulSpaltenHaken -Fenster $f -Key 'TREIBER'
     $f.FindName('BtnStatus').Add_Click({ Start-WolTrStatus })
     $f.FindName('BtnInstall').Add_Click({ Start-WolTrInstallieren })
     $f.FindName('BtnTool').Add_Click({ Start-WolTrTool })
@@ -1236,10 +1241,10 @@ $script:ModulInfo['TREIBER'] = {
         @{ T = 'i'; X = '**BIOS/Firmware einbeziehen:** standardmäßig aus, bei Akkubetrieb Abbruch. Der Schalter gilt für Status prüfen und Installieren.' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Treiber, Verlauf der Installationen, Tool-Log und das Log dieses Geräts.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, PC-Hersteller, Modell, Treiber-Tool und Treiber-Updates sind nur sichtbar, solange dieses Modulfenster offen ist (Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus). Die Spalte "Hersteller" des Cockpits ist der Netzwerk-Hersteller aus der MAC-Adresse.' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, PC-Hersteller, Modell, Treiber-Tool und Treiber-Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus). Die Spalte "Hersteller" des Cockpits ist der Netzwerk-Hersteller aus der MAC-Adresse.' }
         @{ T = 'i'; X = '**Dell:** gezählt werden nur Updates, die dcu-cli selbst meldet (inventarisiert). Nicht inventarisierte Katalog-Einträge stehen als "(+N)" in der Spalte und im Log.' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und APP-Modul:** eigene Aufgaben und Logs; läuft ein anderes WaToKi-Tool auf dem Gerät, steht "Anderes WaToKi-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
-        @{ T = 'i'; X = '**Aufgaben auf dem Gerät** laufen als SYSTEM und werden nach dem Ende gelöscht. Verlauf und Tool-Log liegen im Ordner C:\ProgramData\WaToKi.' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und APP-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**Aufgaben auf dem Gerät** laufen als SYSTEM und werden nach dem Ende gelöscht. Verlauf und Tool-Log liegen im Ordner C:\ProgramData\NET-COCKPIT (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff dorthin umbenannt).' }
         @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-TREIBER\yyyyMMdd_Gerät_treiber-log.txt' }
         @{ T = 'i'; X = '**Gespeicherte Werte:** PC-Hersteller, Modell und Treiber-Tool bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Treiber-Updates, Letzter Neustart und Neustart ausstehend werden nicht gespeichert.' }
         @{ T = 'w'; X = 'Noch nicht an echten Geräten getestet (HP, Lenovo).' }

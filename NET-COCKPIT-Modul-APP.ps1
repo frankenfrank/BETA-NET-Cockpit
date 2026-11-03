@@ -6,7 +6,7 @@
 .DESCRIPTION
     Wird vom NET-COCKPIT beim ersten Aufruf nachgeladen (liegt im selben Ordner) und wirkt auf die markierten, grünen Geräte der Tabelle.
     - Status prüfen: Windows-Version, letzter Neustart, Neustart ausstehend, geplanter Neustart, WinGet-Modul, WinGet-Version, WAU (Ja, Intune, Nein), verfügbare Programm-Updates
-    - App-Updates installieren (still, nie automatischer Neustart), Programm installieren, Programm deinstallieren
+    - App-Updates installieren (still, nie automatischer Neustart), Programm installieren, installierte Programme anzeigen (gemeinsame Liste mit Suche und CSV-Export), Programm deinstallieren
     - WinGet-Modul nachinstallieren (PowerShell 7 und Microsoft.WinGet.Client auf dem Zielgerät); danach läuft automatisch Status prüfen
     - WAU installieren (Winget-AutoUpdate mit Ausschlussliste; Geräte mit WAU, auch der Intune-Variante, werden übersprungen) und WAU-Ausschlüsse bearbeiten (excluded_apps.txt der normalen Installation; die Intune-Variante wird nur erkannt)
     - Details je Gerät: verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und Log
@@ -22,13 +22,15 @@ $script:AppFenster = $null
 $script:AppDeinstallWarten = [System.Collections.Generic.List[object]]::new()
 $script:AppWauWarten = [System.Collections.Generic.List[object]]::new()
 $script:AppWauLauf = $null
+$script:AppListeWarten = [System.Collections.Generic.List[object]]::new()
+$script:AppListeLauf = $null
 ## Vorschlag für die WAU-Ausschlussliste (eine WinGet-Id je Zeile, Platzhalter * erlaubt)
 $script:AppWauStandard = @(
     'Brave.Brave*', 'Google.Chrome*', 'Microsoft.Edge*', 'Microsoft.Office', 'Microsoft.OneDrive', 'Microsoft.RemoteDesktopClient',
     'Microsoft.Teams*', 'Mozilla.Firefox*', 'Opera.Opera*', 'TeamViewer.TeamViewer*', 'Romanitho.Winget-AutoUpdate', 'KnifMelti.WAU-Settings-GUI'
 )
 
-## Spalten (nur sichtbar, solange das Modulfenster offen ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
+## Spalten (nur sichtbar, wenn im Modulfenster der Haken "Spalten des Moduls in der Tabelle anzeigen" gesetzt ist); Windows, Neustart ausstehend und Letzter Neustart teilen sich alle Update-Module
 New-WolSpalte -Key 'Windows' -Titel 'Windows' -Eig '[Windows]' -Breite 270 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'NeustartAusstehend' -Titel 'Neustart ausstehend' -Eig '[NeustartAusstehend]' -Breite 125 -Sichtbar $false -Modul 'Updates'
 New-WolSpalte -Key 'LetzterNeustart' -Titel 'Letzter Neustart' -Eig '[LetzterNeustart]' -Breite 125 -Sichtbar $false -Modul 'Updates'
@@ -40,9 +42,10 @@ New-WolSpalte -Key 'WauStatus' -Titel 'WAU' -Eig '[WauStatus]' -Breite 70 -Sicht
 # Skripte, die auf dem Zielgerät als geplante Aufgabe laufen (PowerShell 7, als SYSTEM)
 ## Gemeinsamer Kopf: Logdatei, Fehlerzähler und Verlauf (Datum;Name;Id;Von;Nach;Ergebnis)
 $script:AppKopf = @'
-$log = 'C:\Windows\Temp\WaToKiAppInstall.log'
+$log = 'C:\Windows\Temp\NetCockpitAppInstall.log'
 $fehlerAnzahl = 0
-$verlaufDatei = 'C:\ProgramData\WaToKi\WingetVerlauf.csv'
+if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
+$verlaufDatei = 'C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv'
 
 ### Eine Zeile in den Verlauf schreiben
 function Add-Verlauf {
@@ -180,7 +183,7 @@ if ($fehlerAnzahl -gt 0) { exit 1 }
 
 ## Installierte Programme lesen (für die Auswahl bei der Deinstallation)
 $script:AppListeSkript = @'
-$out = 'C:\Windows\Temp\WaToKiAppListe.json'
+$out = 'C:\Windows\Temp\NetCockpitAppListe.json'
 try {
     Import-Module Microsoft.WinGet.Client -ErrorAction Stop
     $liste = New-Object System.Collections.Generic.List[object]
@@ -202,7 +205,7 @@ $erg | ConvertTo-Json -Depth 4 | Set-Content -Path $out -Encoding UTF8
 
 ## Suche: WinGet-Version, verfügbare Updates, Cockpit-Verlauf und WAU-Verlauf
 $script:AppSuchSkript = @'
-$out = 'C:\Windows\Temp\WaToKiAppSuche.json'
+$out = 'C:\Windows\Temp\NetCockpitAppSuche.json'
 try {
     Import-Module Microsoft.WinGet.Client -ErrorAction Stop
 
@@ -227,7 +230,8 @@ try {
 
     ### Verlauf der Installationen durch das Cockpit (letzte 50 Einträge, neueste zuerst)
     $verlauf = New-Object System.Collections.Generic.List[object]
-    $datei = 'C:\ProgramData\WaToKi\WingetVerlauf.csv'
+    if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
+    $datei = 'C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv'
     if (Test-Path -Path $datei) {
         foreach ($zeile in @(Get-Content -Path $datei -Encoding UTF8 | Select-Object -Last 50)) {
             $t = @($zeile -split ';')
@@ -413,11 +417,11 @@ $script:AppBlock = {
         $S.Verbunden = $true
         Write-Log "Verbindung erfolgreich als $([string]@($wer)[0])"
 
-        ## Läuft ein anderes WaToKi-Tool (OS oder Treiber) auf dem Gerät?
-        $andere = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'WaToKiApp*')
+        ## Läuft ein anderes NET-COCKPIT-Tool (OS oder Treiber) auf dem Gerät?
+        $andere = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitApp*')
         if ($andere.Count -gt 0) {
-            $S.Status = 'Anderes WaToKi-Tool läuft auf dem Gerät'
-            Write-Log ("Anderes WaToKi-Tool läuft auf dem Gerät: {0}" -f ($andere -join ', '))
+            $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
+            Write-Log ("Anderes NET-COCKPIT-Tool läuft auf dem Gerät: {0}" -f ($andere -join ', '))
             return
         }
 
@@ -467,14 +471,14 @@ $script:AppBlock = {
                 }
                 Write-Log 'Microsoft.WinGet.Client ist vorhanden'
 
-                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'WaToKiAppInstall'
+                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'NetCockpitAppInstall'
                 if ($inst.Vorhanden -and $inst.State -in 'Running', 'Queued') {
                     $S.Status = "Installation läuft bereits auf dem Gerät$zusatz"
                     Write-Log 'Installation läuft bereits auf dem Gerät'
                     return
                 }
 
-                $res = Invoke-Abfrage -Name 'WaToKiAppSuche' -Skript $Skripte.Suche -Wort 'Suche'
+                $res = Invoke-Abfrage -Name 'NetCockpitAppSuche' -Skript $Skripte.Suche -Wort 'Suche'
                 if (-not $res) {
                     if ($S.Status -like 'Suche fehlgeschlagen*') { $S.Winget = '-' }
                     return
@@ -505,19 +509,19 @@ $script:AppBlock = {
                 Write-Log $S.Status
             }
 
-            ## Installierte Programme lesen (für die Auswahl bei der Deinstallation)
-            'ProgrammeLesen' {
+            ## Installierte Programme lesen (für die Auswahl bei der Deinstallation und für die Anzeige)
+            { $_ -in 'ProgrammeLesen', 'ProgrammeAnzeigen' } {
                 $S.Programme = @()
                 if (-not (Test-Modul)) { $S.Status = 'Modul fehlt'; Write-Log 'Microsoft.WinGet.Client fehlt'; return }
 
-                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'WaToKiAppInstall'
+                $inst = Get-WolZielTaskStatus -Ic $ic -Name 'NetCockpitAppInstall'
                 if ($inst.Vorhanden -and $inst.State -in 'Running', 'Queued') {
                     $S.Status = 'Installation läuft bereits auf dem Gerät'
                     Write-Log $S.Status
                     return
                 }
 
-                $res = Invoke-Abfrage -Name 'WaToKiAppListe' -Skript $Skripte.Liste -Wort 'Programmliste'
+                $res = Invoke-Abfrage -Name 'NetCockpitAppListe' -Skript $Skripte.Liste -Wort 'Programmliste'
                 if (-not $res) { return }
 
                 $S.Programme = @(@($res.Programme) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Id = [string]$_.Id; Version = [string]$_.Version; Quelle = [string]$_.Quelle } })
@@ -613,7 +617,7 @@ try { Repair-WinGetPackageManager -AllUsers | Out-Null } catch { Write-Output ('
                     default                  { $Skripte.Install.Replace('__IDS__', (@($Wert -split '\|' | Where-Object { $_ } | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ',')) }
                 }
                 $wort = switch ($Aktion) { 'ProgrammDeinstallieren' { 'Deinstallation' } 'WauInstallieren' { 'WAU-Installation' } default { 'Installation' } }
-                $name = 'WaToKiAppInstall'
+                $name = 'NetCockpitAppInstall'
                 $aufraeumen = $true
                 $zeile = {
                     param($t)
@@ -748,7 +752,16 @@ $script:AppTimer.Add_Tick({
             }
             finally { $script:AppTimer.Start() }
         }
-        if ((Get-WolGruppeOffen -Gruppe 'APP') -eq 0 -and $script:AppDeinstallWarten.Count -eq 0 -and $script:AppWauWarten.Count -eq 0) { $script:AppTimer.Stop() }
+        if ($script:AppListeWarten.Count -gt 0) {
+            $script:AppTimer.Stop()
+            try {
+                $lauf = $script:AppListeWarten[0]
+                $script:AppListeWarten.RemoveAt(0)
+                Show-WolAppProgrammListe -Lauf $lauf
+            }
+            finally { $script:AppTimer.Start() }
+        }
+        if ((Get-WolGruppeOffen -Gruppe 'APP') -eq 0 -and $script:AppDeinstallWarten.Count -eq 0 -and $script:AppWauWarten.Count -eq 0 -and $script:AppListeWarten.Count -eq 0) { $script:AppTimer.Stop() }
     }
     catch { Write-WolLog "Fehler im Timer des Moduls APP: $($_.Exception.Message)" }
 })
@@ -784,6 +797,16 @@ $script:AppFertig = {
         if ($offen.Count -eq 0) {
             $script:AppWauWarten.Add($script:AppWauLauf)
             $script:AppWauLauf = $null
+            if (-not $script:AppTimer.IsEnabled) { $script:AppTimer.Start() }
+        }
+    }
+
+    ### Programmlisten gelesen: sobald alle gelesenen Geräte fertig sind, die gemeinsame Anzeige anstoßen
+    if ($aktion -eq 'ProgrammeAnzeigen' -and $script:AppListeLauf) {
+        $offen = @($script:AppListeLauf.Zeilen | Where-Object { (Get-WolGruppeOffen -Gruppe 'APP' -Zeile $_) -gt 0 })
+        if ($offen.Count -eq 0) {
+            $script:AppListeWarten.Add($script:AppListeLauf)
+            $script:AppListeLauf = $null
             if (-not $script:AppTimer.IsEnabled) { $script:AppTimer.Start() }
         }
     }
@@ -935,6 +958,111 @@ function script:Show-WolAppDeinstallation {
     $wahl = $erg.Programm
     $antwort = [System.Windows.MessageBox]::Show("Programm auf $name deinstallieren?`r`n`r`nName: $($wahl.Name)`r`nId: $($wahl.Id)`r`nVersion: $($wahl.Version)", 'Programm deinstallieren', 'YesNo', 'Warning')
     if ($antwort -eq 'Yes') { Start-WolAppAktion -Aktion 'ProgrammDeinstallieren' -Ziele @($Zeile) -Wert $wahl.Id }
+}
+
+## Programmlisten der markierten Geräte sind gelesen: eine gemeinsame Liste mit Suche, Filter und CSV-Export zeigen (nur Anzeige, nichts wird verändert)
+function script:Show-WolAppProgrammListe {
+    param($Lauf)
+    $eintraege = [System.Collections.Generic.List[object]]::new()
+    $ohneDaten = [System.Collections.Generic.List[string]]::new()
+    foreach ($z in @($Lauf.Zeilen)) {
+        $geraet = Get-WolAppNamen -Zeilen @($z)
+        $programme = @((Get-WolAppSync -Zeile $z).Programme)
+        if ($programme.Count -eq 0) { $ohneDaten.Add($geraet); continue }
+        foreach ($p in $programme) {
+            $eintraege.Add([pscustomobject]@{ Geraet = $geraet; Name = [string]$p.Name; Id = [string]$p.Id; Version = [string]$p.Version; Quelle = [string]$p.Quelle })
+        }
+    }
+    if ($eintraege.Count -eq 0) {
+        Show-WolMeldung ("Es konnten keine Programme gelesen werden.`r`nGeräte: {0}`r`nDetails stehen im Log des jeweiligen Geräts." -f ($ohneDaten -join ', ')) 'Warning'
+        return
+    }
+
+    $f = New-WolFenster @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Installierte Programme" Width="1000" Height="640" WindowStartupLocation="CenterOwner">
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <TextBlock x:Name="LblKopf" Grid.Row="0" FontWeight="Bold" Margin="0,0,0,8"/>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+      <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+      <TextBox x:Name="TxtSuche" Width="300" Margin="0,0,18,0" ToolTip="Sucht in Gerät, Name und Id"/>
+      <CheckBox x:Name="ChkWinget" Content="Nur Quelle winget" IsChecked="False" VerticalAlignment="Center"/>
+    </StackPanel>
+    <DataGrid x:Name="Raster" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+              SelectionMode="Extended" SelectionUnit="FullRow" GridLinesVisibility="Horizontal">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Gerät"   Binding="{Binding Geraet, Mode=OneWay}"  Width="160"/>
+        <DataGridTextColumn Header="Name"    Binding="{Binding Name, Mode=OneWay}"    Width="280"/>
+        <DataGridTextColumn Header="Id"      Binding="{Binding Id, Mode=OneWay}"      Width="*"/>
+        <DataGridTextColumn Header="Version" Binding="{Binding Version, Mode=OneWay}" Width="130"/>
+        <DataGridTextColumn Header="Quelle"  Binding="{Binding Quelle, Mode=OneWay}"  Width="80"/>
+      </DataGrid.Columns>
+    </DataGrid>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+      <Button x:Name="BtnExport" Content="Exportieren (CSV)..." Padding="14,4" Margin="0,0,8,0" ToolTip="Schreibt die aktuell angezeigten Zeilen in eine CSV-Datei (Semikolon, für Excel)"/>
+      <Button x:Name="BtnSchliessen" Content="Schließen" Padding="14,4" IsCancel="True"/>
+    </StackPanel>
+  </Grid>
+</Window>
+'@
+    $f.Owner = $script:Fenster
+    $raster = $f.FindName('Raster')
+    $suche = $f.FindName('TxtSuche')
+    $chk = $f.FindName('ChkWinget')
+    $kopf = $f.FindName('LblKopf')
+    $gesamt = $eintraege.Count
+    $anzahlGeraete = @($eintraege | Select-Object -ExpandProperty Geraet -Unique).Count
+    $startOrdner = $(if ($script:ListenPfad) { Split-Path -Path $script:ListenPfad } else { $script:DatenOrdner })
+
+    $raster.ItemsSource = $eintraege
+    $ansicht = [System.Windows.Data.CollectionViewSource]::GetDefaultView($raster.ItemsSource)
+    $pruefen = {
+        param($zeile)
+        if ($chk.IsChecked -and $zeile.Quelle -ne 'winget') { return $false }
+        $t = $suche.Text.Trim()
+        if (-not $t) { return $true }
+        return (($zeile.Name.IndexOf($t, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($zeile.Id.IndexOf($t, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($zeile.Geraet.IndexOf($t, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))
+    }.GetNewClosure()
+    $ansicht.Filter = [System.Predicate[object]]$pruefen
+    $aktualisieren = {
+        $ansicht.Refresh()
+        $kopf.Text = ('Installierte Programme auf {0} Gerät(en): {1} von {2}' -f $anzahlGeraete, @($ansicht).Count, $gesamt)
+    }.GetNewClosure()
+    & $aktualisieren
+    $suche.Add_TextChanged({ & $aktualisieren }.GetNewClosure())
+    $chk.Add_Checked({ & $aktualisieren }.GetNewClosure())
+    $chk.Add_Unchecked({ & $aktualisieren }.GetNewClosure())
+    $f.Add_Loaded({ [void]$suche.Focus() }.GetNewClosure())
+
+    $f.FindName('BtnExport').Add_Click({
+        $dlg = [Microsoft.Win32.SaveFileDialog]::new()
+        $dlg.Title = 'Programmliste exportieren'
+        $dlg.Filter = 'CSV-Datei (*.csv)|*.csv'
+        $dlg.FileName = ('Installierte-Programme_{0:yyyyMMdd}.csv' -f (Get-Date))
+        if ($startOrdner -and (Test-Path -LiteralPath $startOrdner)) { $dlg.InitialDirectory = $startOrdner }
+        if ($dlg.ShowDialog($f) -ne $true) { return }
+        try {
+            $zeilen = @($ansicht)
+            $zeilen | Select-Object @{ Name = 'Gerät'; Expression = { $_.Geraet } }, Name, Id, Version, Quelle | Export-Csv -Path $dlg.FileName -Delimiter ';' -NoTypeInformation -Encoding utf8BOM
+            [void][System.Windows.MessageBox]::Show($f, ("{0} Zeilen exportiert:`r`n{1}" -f $zeilen.Count, $dlg.FileName), 'Programmliste exportieren', 'OK', 'Information')
+        }
+        catch {
+            [void][System.Windows.MessageBox]::Show($f, "Der Export ist fehlgeschlagen: $($_.Exception.Message)", 'Programmliste exportieren', 'OK', 'Warning')
+        }
+    }.GetNewClosure())
+    $f.FindName('BtnSchliessen').Add_Click({ $f.Close() }.GetNewClosure())
+
+    $f.Show()
+    if ($ohneDaten.Count -gt 0) {
+        Show-WolMeldung ("Für diese Geräte konnten keine Programme gelesen werden: {0}`r`nDetails stehen im Log des jeweiligen Geräts." -f ($ohneDaten -join ', ')) 'Warning'
+    }
 }
 
 ## Details eines Geräts: verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und Log
@@ -1132,6 +1260,19 @@ function script:Start-WolAppDeinstallieren {
     if ($ziele) { Start-WolAppAktion -Aktion 'ProgrammeLesen' -Ziele $ziele }
 }
 
+## Installierte Programme anzeigen: Programmlisten der markierten Geräte lesen (danach öffnet der Timer die gemeinsame Liste)
+function script:Start-WolAppProgrammListe {
+    $ziele = Get-WolAppZiele
+    if (-not $ziele) { return }
+    $lesen = @($ziele | Where-Object { $_.Ampel -eq 'Gruen' -and (Get-WolGruppeOffen -Gruppe 'APP' -Zeile $_) -eq 0 })
+    if ($lesen.Count -eq 0) {
+        Show-WolMeldung 'Keines der markierten Geräte ist grün (WinRM erreichbar) oder frei (es läuft schon eine Aktion des Moduls).'
+        return
+    }
+    $script:AppListeLauf = @{ Zeilen = $lesen }
+    Start-WolAppAktion -Aktion 'ProgrammeAnzeigen' -Ziele $lesen
+}
+
 ## WinGet-Modul nachinstallieren (Geräte, bei denen es schon da ist, werden übersprungen)
 function script:Start-WolAppModul {
     $ziele = Get-WolAppZiele
@@ -1273,12 +1414,16 @@ function script:Show-WolModulAPP {
         Title="APP-Updates" Width="400" SizeToContent="Height" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
   <StackPanel Margin="14">
     <TextBlock Text="Wirkt auf die markierten Geräte der Tabelle (nur grüne, WinRM erreichbar). Aufträge laufen über die Warteschlange des NET-COCKPIT." TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,12"/>
+    <CheckBox x:Name="ChkSpalten" Content="Spalten des Moduls in der Tabelle anzeigen" Margin="0,0,0,10"
+              ToolTip="Blendet die Spalten dieses Moduls in der Tabelle ein (Standard: aus). Beim Schließen des Fensters werden sie wieder ausgeblendet"/>
     <Button x:Name="BtnStatus" Content="Status prüfen" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Prüft Windows-Version, letzten Neustart, ausstehenden und geplanten Neustart, WinGet-Modul, WinGet-Version und WAU und sucht Programm-Updates"/>
     <Button x:Name="BtnInstall" Content="App-Updates installieren" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Zeigt die Updates der markierten Geräte (laut letztem Status prüfen) zur Auswahl und installiert nur die angehakten still, es wird nie automatisch neu gestartet"/>
     <Button x:Name="BtnProgramm" Content="Programm installieren..." Padding="10,5" Margin="0,0,0,6"
             ToolTip="Installiert ein Programm aus WinGet (Id eingeben, zum Beispiel 7zip.7zip) auf den markierten Geräten"/>
+    <Button x:Name="BtnProgListe" Content="Installierte Programme anzeigen..." Padding="10,5" Margin="0,0,0,6"
+            ToolTip="Liest die installierten Programme (WinGet) der markierten Geräte und zeigt sie in einer gemeinsamen Liste mit Suche, Filter und CSV-Export (nur Anzeige, es wird nichts verändert)"/>
     <Button x:Name="BtnDeinstall" Content="Programm deinstallieren..." Padding="10,5" Margin="0,0,0,6"
             ToolTip="Liest die installierten Programme (WinGet) eines markierten Geräts ein und deinstalliert das gewählte Programm still"/>
     <Button x:Name="BtnModul" Content="WinGet-Modul nachinstallieren" Padding="10,5" Margin="0,0,0,6"
@@ -1294,9 +1439,11 @@ function script:Show-WolModulAPP {
 </Window>
 '@
     $f.Owner = $script:Fenster
+    Connect-WolModulSpaltenHaken -Fenster $f -Key 'APP'
     $f.FindName('BtnStatus').Add_Click({ Start-WolAppStatus })
     $f.FindName('BtnInstall').Add_Click({ Start-WolAppInstallieren })
     $f.FindName('BtnProgramm').Add_Click({ Start-WolAppProgramm })
+    $f.FindName('BtnProgListe').Add_Click({ Start-WolAppProgrammListe })
     $f.FindName('BtnDeinstall').Add_Click({ Start-WolAppDeinstallieren })
     $f.FindName('BtnModul').Add_Click({ Start-WolAppModul })
     $f.FindName('BtnWauInstall').Add_Click({ Start-WolAppWauInstallieren })
@@ -1323,18 +1470,19 @@ $script:ModulInfo['APP'] = {
         @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart, Neustart ausstehend, geplanter Neustart, Modul, WinGet-Version, WAU (Ja = normale Installation, Intune = Intune-Variante, Nein) und verfügbare Programm-Updates.' }
         @{ T = 'i'; X = '**App-Updates installieren:** öffnet eine Liste mit den Updates aller markierten Geräte (aus dem letzten Status prüfen, jedes Programm einmal, mit "x von n" Geräten) mit Haken, Alle markieren und Keine markieren. Microsoft.PowerShell ist nicht vorangehakt. Installiert wird nur das Angehakte und nur auf Geräten, die das Update haben; andere Geräte bekommen "Kein gewähltes Update - übersprungen". Geräte ohne Statusdaten: "Bitte zuerst Status prüfen". Still, nie automatischer Neustart; ist einer nötig, steht es im Status (auslösen über Aktionen > Neustart planen).' }
         @{ T = 'i'; X = '**Programm installieren...:** WinGet-Id eingeben, zum Beispiel 7zip.7zip.' }
+        @{ T = 'i'; X = '**Installierte Programme anzeigen...:** liest die installierten Programme (WinGet) der markierten Geräte und zeigt sie gemeinsam in einer Liste mit Suche, Filter "Nur Quelle winget" und CSV-Export (nur Anzeige, es wird nichts verändert).' }
         @{ T = 'i'; X = '**Programm deinstallieren...:** liest die installierten Programme eines markierten Geräts, danach ein Programm auswählen und still deinstallieren.' }
         @{ T = 'i'; X = '**WinGet-Modul nachinstallieren:** PowerShell 7 und Modul auf dem Zielgerät einrichten. Danach läuft automatisch Status prüfen für dieses Gerät.' }
         @{ T = 'i'; X = '**WAU installieren...:** ein Dialog mit der Ausschlussliste (vorbelegt mit dem Standardvorschlag, eine WinGet-Id je Zeile, * als Platzhalter) gilt für alle markierten Geräte. Installiert wird Winget-AutoUpdate (Romanitho.Winget-AutoUpdate) mit Updates monatlich und bei Anmeldung und Benachrichtigung nur bei Erfolg; die Liste landet in C:\Program Files\Winget-AutoUpdate\excluded_apps.txt. Geräte, auf denen WAU schon läuft (auch die Intune-Variante), werden übersprungen: "WAU schon vorhanden - übersprungen".' }
         @{ T = 'i'; X = '**WAU-Ausschlüsse bearbeiten...:** liest die Liste der markierten Geräte mit normaler WAU (zuerst Status prüfen), zeigt sie zum Bearbeiten und schreibt sie auf alle markierten Geräte; ohne Neuinstallation. Unterscheiden sich die Listen, steht ein Hinweis im Dialog. Geräte mit der Intune-Variante werden nicht geändert ("Intune-Variante, Liste über Intune pflegen").' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und das Log dieses Geräts.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, WinGet-Modul, App-Updates, WinGet-Version und WAU sind nur sichtbar, solange dieses Modulfenster offen ist (Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, WinGet-Modul, App-Updates, WinGet-Version und WAU sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
         @{ T = 'i'; X = '**Nur** maschinenweit installierte Programme aus der Quelle winget.' }
         @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP:** Optionen > Verbindung (TrustedHosts) und ein lokales Konto (Optionen > Konto für markierte Geräte, Gerätename\Benutzer).' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes WaToKi-Tool auf dem Gerät, steht "Anderes WaToKi-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
         @{ T = 'i'; X = '**WAU-Verlauf:** die letzten 100 Updates aus dem Log von Winget-AutoUpdate. Gesucht wird in C:\Program Files\Winget-AutoUpdate\logs\updates.log (Domänengeräte) und C:\Program Files\Winget-Autoupdate-aaS\Winget-AutoUpdate\logs\updates.log (Intune-Clients).' }
-        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt. Auf dem Zielgerät liegen Cockpit-Verlauf (C:\ProgramData\WaToKi\WingetVerlauf.csv) und Installationslog (C:\Windows\Temp\WaToKiAppInstall.log).' }
+        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt. Auf dem Zielgerät liegen Cockpit-Verlauf (C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv) (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff in NET-COCKPIT umbenannt) und Installationslog (C:\Windows\Temp\NetCockpitAppInstall.log).' }
         @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version, WinGet-Modul, WinGet-Version und WAU bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und App-Updates werden nicht gespeichert.' }
         @{ T = 'w'; X = 'Das Modul ist noch nicht vollständig auf echten Geräten getestet.' }
     ) }
