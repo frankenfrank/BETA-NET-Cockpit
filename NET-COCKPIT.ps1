@@ -904,6 +904,14 @@ $script:KudoBlock = {
             $hddClient = (@($platten | ForEach-Object { '{0}{1}GB' -f $_.DeviceID, [math]::Round($_.Size / 1GB, 0) })) -join '; '
             $hddServer = (@($platten | ForEach-Object { '{0}:{1}' -f $_.DeviceID.TrimEnd(':'), [math]::Round([math]::Round($_.Size / 1TB, 2) * 1000, 0) })) -join '; '
 
+            ### TeamViewer-ID aus der Registrierung (REG_DWORD ClientID, als vorzeichenlose Dezimalzahl)
+            $tvId = 'nicht gefunden'
+            try {
+                $tvWert = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\TeamViewer' -Name 'ClientID' -ErrorAction Stop).ClientID
+                $tvId = [string][System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int]$tvWert), 0)
+            }
+            catch { $tvId = 'nicht gefunden' }
+
             ### Serverrollen und IP-Adressen (nur Server)
             $rollenText = ''
             $protokolle = ''
@@ -955,6 +963,7 @@ $script:KudoBlock = {
                     Feld 'HDD (GB)' $hddClient
                     Feld 'Seriennummer' $bios.SerialNumber
                     Feld 'Installationsdatum' $installDatum
+                    Feld 'TeamViewer-ID' $tvId
                 )
                 $fussnote = ''
             }
@@ -973,6 +982,7 @@ $script:KudoBlock = {
                     Feld 'Seriennummer' $bios.SerialNumber
                     Feld 'OS Install Date' ('{0} (evtl. Kaufdatum)' -f $installDatum)
                     Feld 'Notizen' $protokolle
+                    Feld 'TeamViewer-ID' $tvId
                 )
                 $fussnote = '*Es werden nur die wichtigsten Rollen ermittelt.'
             }
@@ -986,6 +996,7 @@ $script:KudoBlock = {
                     Feld 'RAM (GB)' $ramGb
                     Feld 'HDD (GB)' $hddServer
                     Feld 'Notizen' $protokolle
+                    Feld 'TeamViewer-ID' $tvId
                 )
                 $fussnote = '*Es werden nur die wichtigsten Rollen ermittelt.'
             }
@@ -1631,6 +1642,7 @@ function Get-WolInfoInhalt {
         @{ T = 'h'; X = 'KuDo-Informationen auslesen' }
         @{ T = 'i'; X = '**KuDo-Informationen auslesen:** liest die Geräteinformationen der markierten Geräte aus. Das Cockpit prüft dafür je Gerät live die Ports: Ist WinRM (5985) offen, gilt das Gerät als Windows, auch wenn SSH ebenfalls offen ist. Sonst gilt es bei offenem SSH-Port 22 als Linux. Rote Geräte und Geräte, bei denen beide Ports zu sind, werden übersprungen. Das Ergebnis steht im Log und in der orangen Statuszeile; ein Fehler zeigt kurz die Spalte "Aktion / Status", der volle Text steht in der Logdatei.' }
         @{ T = 'i'; X = '**Hostname, MAC und Hersteller:** werden beim Auslesen in die Tabelle ergänzt, aber nur in leere Zellen; vorhandene Werte werden nie überschrieben. Die MAC kommt vom Adapter mit der Geräte-IP. Virtuelle Adapter (zum Beispiel VPN) zählen nicht: Dann gilt die MAC des einzigen aktiven physischen Adapters, bei mehreren bleibt das Feld leer. Eine MAC, die schon in einer anderen Zeile steht, wird nicht eingetragen. Der Hersteller kommt aus der Herstellerliste. Geräte ohne Hostname werden per IP angesprochen, dafür fragt das Cockpit Konto und Kennwort ab.' }
+        @{ T = 'i'; X = '**TeamViewer-ID:** steht bei Windows-Geräten als letztes Feld in den KuDo-Informationen. Sie wird aus der Registrierung gelesen (HKLM\SOFTWARE\WOW6432Node\TeamViewer, Wert ClientID) und als Dezimalzahl angezeigt; ohne TeamViewer steht "nicht gefunden".' }
         @{ T = 'i'; X = '**Typ:** Client (kein Server-Betriebssystem), Server virtuell (Hersteller oder Modell weist auf Hyper-V, VMware, VirtualBox, QEMU/KVM, Xen, Parallels oder Nutanix AHV hin), sonst Server physisch. Steht in der Spalte "Typ" schon Client, Server physisch oder Server virtuell, gilt dieser Typ. Ein vorhandener Eintrag wird nie überschrieben.' }
         @{ T = 'i'; X = '**Anzeige:** im Detailfenster (Doppelklick) mit "Kopieren" je Wert (außer beim freien Speicher der Laufwerke, bei Clients und Servern: dort stehen Text und Balken, der Balken zeigt den belegten Anteil und wird ab 90 % rot). Geänderte Felder gegenüber der vorherigen Auslesung stehen orange mit dem alten Wert. Die Ergebnisse liegen im Datenordner und sind beim nächsten Start wieder da.' }
         @{ T = 'i'; X = '**Linux-Geräte:** brauchen das PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (fehlt es, fragt das Cockpit, ob es für dein Benutzerkonto installiert werden soll: Install-Module -Name Posh-SSH -Scope CurrentUser; dafür braucht dieser Rechner Internet) und in der Spalte "Konto" einen Benutzer mit SSH-Zugang (root hat meist keinen). Die Anmeldung läuft nur mit Kennwort. Vor dem Auslesen testet das Cockpit die Anmeldung. Bei einer Herausforderung (Kennwort, Benutzer, Port, Hostschlüssel) fragt es: Ja = Gerät überspringen und weitermachen, Nein = das gesamte Auslesen abbrechen. Der Hostschlüssel wird beim ersten Kontakt automatisch akzeptiert und gespeichert, danach wird er geprüft. Die Anmeldungen laufen nacheinander, weil Posh-SSH alle Hostschlüssel in einer gemeinsamen Datei speichert.' }
@@ -1729,7 +1741,7 @@ function Get-WolInfoInhalt {
             @{ T = 'h'; X = '3. Firewall (Endpoint Security)' }
             @{ T = 'i'; X = 'Intune > Endpoint Security > Firewall > Richtlinie erstellen > Windows > Microsoft Defender-Firewallregeln, Name zum Beispiel **cp - WinRM und Ping**, zwei Regeln.' }
             @{ T = 'i'; X = '**WinRM (TCP 5985) eingehend - nur Admin-PC:** Richtung Eingehend, Aktion Zulassen, Protokoll TCP (6), lokaler Port **5985**, lokale Adressen **CLIENT-NETZ**, Remote-Adressen **ADMIN-IP**, Netzwerktypen alle.' }
-            @{ T = 'i'; X = '**Ping (ICMPv4 Echo) eingehend - nur Admin-PC:** Richtung Eingehend, Aktion Zulassen, Protokoll **1** (ICMPv4), ICMP-Typen und -Codes 8:*, lokale Adressen **CLIENT-NETZ**, Remote-Adressen **ADMIN-IP**, Netzwerktypen alle.' }
+            @{ T = 'i'; X = '**Ping (ICMPv4 Echo) eingehend - nur Admin-PC:** Richtung Eingehend, Aktion Zulassen, Protokoll **1** (ICMPv4), ICMP-Typen und -Codes **leer lassen** (gilt dann für alle ICMPv4-Typen, funktioniert auf Windows 10 und 11; mit 8:* wäre es nur Echo, aber das wird nur unter Windows 11 unterstützt und lässt auf Windows 10 den ganzen Regelblock scheitern), lokale Adressen **CLIENT-NETZ**, Remote-Adressen **ADMIN-IP**, Netzwerktypen alle.' }
             @{ T = 'i'; X = 'Ist ein Gerät in einem anderen Netz (zum Beispiel zu Hause), passen die lokalen Adressen nicht und es ist von außen nicht erreichbar.' }
             @{ T = 'h'; X = '4. Zuweisen und prüfen' }
             @{ T = 'i'; X = 'Alle drei zuerst an eine Testgruppe zuweisen. Auf dem Gerät synchronisieren: Einstellungen > Konten > Auf Arbeits- oder Schulkonto zugreifen > Info > Synchronisieren (die Plattformskripte können etwas länger brauchen).' }
@@ -1739,6 +1751,25 @@ function Get-WolInfoInhalt {
             @{ T = 'i'; X = 'Lässt sich der Hostname eines Geräts nicht auflösen (ohne Domäne meist kein DNS-Eintrag), verbindet sich das Cockpit automatisch per IP-Adresse. Dafür braucht die IP den Eintrag in den TrustedHosts, und Konto und Kennwort werden abgefragt.' }
             @{ T = 'i'; X = 'Der Admin-PC braucht die Geräte in den TrustedHosts: **Optionen > Verbindung** (das Cockpit muss dafür als Administrator laufen).' }
             @{ T = 'i'; X = 'Bei lokalen Konten außer dem eingebauten Administrator filtert Windows das Admin-Token beim Remotezugriff, solange **LocalAccountTokenFilterPolicy** nicht gesetzt ist.' }
+        ) }
+        @{ Titel = 'Freischaltung lokal (Skript)'; Bloecke = @(
+            @{ T = 'h'; X = 'Wofür?' }
+            @{ T = 'p'; X = 'Grundfreischaltung für eine Workstation ohne Domäne und ohne Intune: WinRM (TCP 5985) und Ping, nur vom Admin-PC aus. Läuft lokal auf dem Client mit dem Skript **Enable-PSRemoting_v1.4_2026-11-03.ps1**.' }
+            @{ T = 'h'; X = 'Ablauf' }
+            @{ T = 'i'; X = 'Auf dem Client PowerShell ISE als Administrator öffnen.' }
+            @{ T = 'i'; X = 'Skriptinhalt einfügen und auf Play klicken.' }
+            @{ T = 'i'; X = 'Die Fragen beantworten: **CLIENT-NETZ**, **ADMIN-IP**, Benutzerprüfung (j/n) mit Benutzername.' }
+            @{ T = 'i'; X = 'Die Zusammenfassung mit **j** bestätigen.' }
+            @{ T = 'i'; X = 'Das Skript setzt den Dienst WinRM auf Automatisch, aktiviert Remoting und legt die zwei Firewallregeln an. Log: **C:\Temp\WinRM-Setup**.' }
+        ) }
+        @{ Titel = 'Prüfen und Namensauflösung'; Bloecke = @(
+            @{ T = 'h'; X = 'Prüfen (alle Varianten), auf dem Admin-PC' }
+            @{ T = 'i'; X = 'Ping auf das Gerät.' }
+            @{ T = 'i'; X = '**Test-WSMan -ComputerName** mit dem Gerätenamen oder der IP.' }
+            @{ T = 'i'; X = 'Negativtest: Von einem anderen Rechner muss beides fehlschlagen.' }
+            @{ T = 'h'; X = 'Namensauflösung' }
+            @{ T = 'i'; X = 'Der Gerätename muss vom Admin-PC auflösbar sein (DNS). Geräte ohne Domäne stehen oft nicht im DNS, dann per IP verbinden.' }
+            @{ T = 'i'; X = 'Bei Verbindung per IP oder ohne Domäne muss der Admin-PC das Gerät in den TrustedHosts führen.' }
         ) }
     ) })
 
