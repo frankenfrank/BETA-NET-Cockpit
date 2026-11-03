@@ -36,7 +36,7 @@
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
     - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
-    - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel); fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
+    - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel) und legt zusätzlich die Datei net-cockpit-server.json neben das Cockpit; fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
 Clear-Host
@@ -76,6 +76,18 @@ $script:EinstellungenPfad = Join-Path $script:DatenOrdner 'NET-COCKPIT-einstellu
 $script:ModulOrdner       = $PSScriptRoot
 $script:ServerBasis      = [string]$env:NETCOCKPIT_BASE
 $script:ServerSchluessel  = [string]$env:NETCOCKPIT_KEY
+### Fehlen die Umgebungsvariablen, steht der Server in der Datei net-cockpit-server.json neben dem Cockpit (legt start.ps1 an)
+if ($PSScriptRoot -and (-not $script:ServerBasis -or -not $script:ServerSchluessel)) {
+    $serverDatei = Join-Path $PSScriptRoot 'net-cockpit-server.json'
+    if (Test-Path -LiteralPath $serverDatei) {
+        try {
+            $serverInfo = Get-Content -LiteralPath $serverDatei -Raw -Encoding utf8 | ConvertFrom-Json
+            $script:ServerBasis = [string]$serverInfo.Base
+            $script:ServerSchluessel = [string]$serverInfo.Key
+        }
+        catch { }
+    }
+}
 $script:ListenPfad        = $null
 if (-not (Test-Path $script:DatenOrdner)) { New-Item -Path $script:DatenOrdner -ItemType Directory -Force | Out-Null }
 
@@ -4415,7 +4427,8 @@ function Open-WolModul {
             if (-not (Install-WolNachladen -Titel "Modul $($m.Name) wird gestartet" -Pfade @($m.Datei) -ZielOrdner $script:ModulOrdner)) { return }
         }
         if (-not $pfad -or -not (Test-Path -LiteralPath $pfad)) {
-            Show-WolMeldung "Das Modul $($m.Name) wurde nicht gefunden.`r`nErwartet wird die Datei $($m.Datei) im selben Ordner wie das NET-COCKPIT." 'Warning'
+            $serverHinweis = $(if ($script:ServerBasis -and $script:ServerSchluessel) { '' } else { "`r`n`r`nDem NET-COCKPIT ist kein Server bekannt (Start nicht über start.ps1), deshalb kann es das Modul nicht nachladen." })
+            Show-WolMeldung "Das Modul $($m.Name) wurde nicht gefunden.`r`nErwartet wird die Datei $($m.Datei) im selben Ordner wie das NET-COCKPIT.$serverHinweis" 'Warning'
             return
         }
         try {
