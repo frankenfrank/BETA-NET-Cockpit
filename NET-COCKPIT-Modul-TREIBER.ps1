@@ -503,14 +503,21 @@ try {
             if (-not (Get-DcuPfad)) { Write-Zeile 'dcu-cli.exe ist nach der Installation nicht vorhanden'; exit 1 }
         }
 
-        ### HP: HPCMSL aus der PSGallery, danach HP Image Assistant entpacken
+        ### HP: PowerShellGet aktualisieren, HPCMSL aus der PSGallery installieren, danach HP Image Assistant entpacken
         'HP' {
             $null = Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-            try { Install-Module -Name HPCMSL -Scope AllUsers -Force -AcceptLicense -SkipPublisherCheck -ErrorAction Stop }
-            catch {
-                Write-Zeile ("Installation mit -AcceptLicense fehlgeschlagen: {0}" -f $_.Exception.Message)
-                Install-Module -Name HPCMSL -Scope AllUsers -Force -ErrorAction Stop
+            ## Ältere PowerShellGet-Versionen (Windows PowerShell 5.1 liefert 1.0.0.1) können die HP-Module nicht installieren (PowerShellGetFormatVersion 2.0) und überspringen sie ohne Fehler
+            $pg = @(Get-Module -ListAvailable -Name PowerShellGet | Sort-Object -Property Version -Descending) | Select-Object -First 1
+            if (-not $pg -or $pg.Version -lt [version]'2.2.5') {
+                Write-Zeile ('PowerShellGet {0} ist zu alt, aktualisiere auf 2.2.5 oder neuer' -f $(if ($pg) { $pg.Version } else { 'fehlt' }))
+                Install-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
             }
+            ## HPCMSL in einem frischen Prozess installieren, damit die neue PowerShellGet-Version geladen wird
+            Write-Zeile 'Installiere HPCMSL in einem neuen PowerShell-Prozess'
+            $befehl = 'Import-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Force; Install-Module -Name HPCMSL -Scope AllUsers -Force -AcceptLicense -SkipPublisherCheck -ErrorAction Stop'
+            $ausgabe = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $befehl 2>&1 | Out-String
+            foreach ($z in @($ausgabe -split "`r?`n")) { if ($z.Trim()) { Write-Zeile ('  ' + $z.TrimEnd()) } }
+            if (-not (Get-Module -ListAvailable -Name HPCMSL)) { Write-Zeile 'HPCMSL ist nach der Installation nicht vorhanden'; exit 1 }
             Import-Module -Name HPCMSL -Force -ErrorAction Stop
             Write-Zeile 'HPCMSL geladen, lade und entpacke den HP Image Assistant'
             if (-not (Test-Path -Path $hpiaOrdner)) { New-Item -ItemType Directory -Path $hpiaOrdner -Force | Out-Null }

@@ -84,7 +84,7 @@ $script:ModulInfo['TREIBER'] = {
         @{ T = 'h'; X = 'Knöpfe' }
         @{ T = 'i'; X = '**Status prüfen:** PC-Hersteller, Modell, Windows-Version, Neustart, Akkubetrieb, Treiber-Tool und Treiber-Updates.' }
         @{ T = 'i'; X = '**Treiber-Updates installieren:** mit Rückfrage, still, nie automatischer Neustart. Ist einer nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
-        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. Danach läuft automatisch Status prüfen für dieses Gerät.' }
+        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. HP: Ist das PowerShellGet auf dem Gerät älter als 2.2.5 (Windows PowerShell 5.1 liefert eine ältere Version), aktualisiert das Modul es vorher; danach wird HPCMSL in einem neuen PowerShell-Prozess installiert (das Gerät braucht Internetzugang zur PSGallery). Danach läuft automatisch Status prüfen für dieses Gerät.' }
         @{ T = 'i'; X = '**BIOS/Firmware einbeziehen:** standardmäßig aus, bei Akkubetrieb Abbruch. Der Schalter gilt für Status prüfen und Installieren.' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Treiber, Verlauf der Installationen, Tool-Log und das Log dieses Geräts.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
