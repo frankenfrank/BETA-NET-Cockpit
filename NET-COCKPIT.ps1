@@ -1778,7 +1778,7 @@ function Show-WolInfo {
     $script:InfoReiter = [System.Collections.Generic.List[object]]::new()
     $script:InfoAktSuche = ''
     foreach ($r in (Get-WolInfoInhalt)) {
-        $seiten = if ($r.Unter) { @($r.Unter) } else { @(@{ Titel = $r.Titel; Bloecke = $r.Bloecke }) }
+        $seiten = @(if ($r.Unter) { $r.Unter } else { @{ Titel = $r.Titel; Bloecke = $r.Bloecke } })
         $box = [System.Windows.Controls.RichTextBox]::new()
         $box.IsReadOnly = $true
         $box.BorderThickness = [System.Windows.Thickness]::new(0)
