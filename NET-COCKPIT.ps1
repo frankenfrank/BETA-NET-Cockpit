@@ -1558,6 +1558,275 @@ function Show-WolKennwort {
 
 ## Info / Voraussetzungen (Reiter mit Suche)
 ### Inhalt der Info: Reiter mit Blöcken (h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten, a = Ampelzeile); die Reiter folgen der Menüleiste; der Reiter Module hat eine Auswahlleiste mit der Hilfe je Modul
+### Skript für Geräte ohne Domäne und ohne Intune (wird im Reiter Voraussetzungen mit Kopieren-Knopf angezeigt)
+$script:InfoSkriptLokal = @'
+Clear-Host
+
+<#
+.SYNOPSIS
+    Aktiviert WinRM (PowerShell Remoting) und Ping auf einem Windows-Client, erreichbar nur von der Admin-IP ($AdminIP) und nur auf den Client-Netzen ($ClientNetworks).
+
+.DESCRIPTION
+    Das Skript wird lokal auf dem Client als Administrator ausgeführt (auch für Geräte ohne Domäne).
+    1. Stellt den Dienst WinRM auf Automatisch und startet ihn
+    2. Aktiviert PowerShell Remoting (Listener, Netzwerkprofil-Prüfung übersprungen)
+    3. Deaktiviert die Standard-Firewallregeln für WinRM (nicht quell-beschränkt)
+    4. Legt eigene Firewallregeln an: TCP 5985 und ICMPv4 Echoanforderung, nur von $AdminIP, gültig für die lokalen Adressen aus $ClientNetworks (alle Netzwerkprofile)
+    5. Optional (Variable $CheckAdminUser): Prüft, ob der angegebene lokale Benutzer existiert und Mitglied der lokalen Administratorengruppe ist (sprachunabhängig über die SID)
+    6. Prüft das Ergebnis und schreibt ein Log nach C:\Temp\WinRM-Setup
+
+    Client-Netze, Admin-IP und die Benutzerprüfung werden beim Start abgefragt. Feste Einstellungen stehen im Block "Variablen" am Anfang des Skripts.
+
+.NOTES
+    Dateiname : Enable-PSRemoting_v1.4_2026-11-03.ps1
+    Ausführung: Lokal auf dem Client, PowerShell als Administrator
+#>
+
+# Hauptblock: Variablen und Logging
+
+## Variablen
+$RuleNameWinRM = "Enable PS Remoting - WinRM TCP 5985"
+$RuleNamePing = "Enable PS Remoting - Ping ICMPv4"
+$AdminGroupSid = "S-1-5-32-544"
+$LogFolder = "C:\Temp\WinRM-Setup"
+$LogFile = Join-Path $LogFolder ("Enable-PSRemoting_{0}.log" -f (Get-Date -Format "yyyyMMdd"))
+
+## Prüffunktionen für die Eingaben
+function Test-Ipv4Address {
+    param([string]$Value)
+    $Address = $null
+    if ($Value -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { return $false }
+    return [System.Net.IPAddress]::TryParse($Value, [ref]$Address)
+}
+
+function Test-Ipv4Cidr {
+    param([string]$Value)
+    $Address = $null
+    if ($Value -notmatch '^(?<ip>\d{1,3}(\.\d{1,3}){3})/(?<prefix>\d{1,2})$') { return $false }
+    if (-not [System.Net.IPAddress]::TryParse($Matches['ip'], [ref]$Address)) { return $false }
+    return ([int]$Matches['prefix'] -le 32)
+}
+
+## Abfrage der Eingaben
+
+### Client-Netze
+$ClientNetworks = @()
+while ($ClientNetworks.Count -eq 0) {
+    $Eingabe = Read-Host "In welchen Netzen liegen die Clients? Bitte Netzadresse mit Präfixlänge angeben, mehrere Netze durch Komma getrennt"
+    $Werte = @($Eingabe -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($Werte.Count -gt 0 -and -not ($Werte | Where-Object { -not (Test-Ipv4Cidr -Value $_) })) {
+        $ClientNetworks = $Werte
+    }
+    else {
+        Write-Host "Ungültige Eingabe. Erwartet wird das Format Netzadresse/Präfixlänge, mehrere Netze durch Komma getrennt." -ForegroundColor Yellow
+    }
+}
+
+### Admin-IP
+$AdminIP = @()
+while ($AdminIP.Count -eq 0) {
+    $Eingabe = Read-Host "Welche IP-Adresse hat der Admin-PC oder Admin-Server, von dem aus verwaltet wird? Mehrere Adressen durch Komma getrennt"
+    $Werte = @($Eingabe -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($Werte.Count -gt 0 -and -not ($Werte | Where-Object { -not (Test-Ipv4Address -Value $_) })) {
+        $AdminIP = $Werte
+    }
+    else {
+        Write-Host "Ungültige Eingabe. Erwartet wird eine IPv4-Adresse, mehrere Adressen durch Komma getrennt." -ForegroundColor Yellow
+    }
+}
+
+### Prüfung des lokalen Administrator-Benutzers
+$Antwort = ""
+while ($Antwort -notin @("j", "n")) {
+    $Antwort = (Read-Host "Soll geprüft werden, ob ein lokaler Administrator-Benutzer existiert und in der Administratorengruppe ist? (j/n)").Trim().ToLower()
+}
+$CheckAdminUser = ($Antwort -eq "j")
+
+$AdminUserName = ""
+if ($CheckAdminUser) {
+    while ([string]::IsNullOrWhiteSpace($AdminUserName)) {
+        $AdminUserName = (Read-Host "Wie heißt der lokale Administrator-Benutzer auf diesem Client?").Trim()
+    }
+}
+
+### Zusammenfassung und Bestätigung
+Write-Host ""
+Write-Host "Zusammenfassung der Eingaben:"
+Write-Host "1. Client-Netze: $($ClientNetworks -join ', ')"
+Write-Host "2. Admin-IP: $($AdminIP -join ', ')"
+if ($CheckAdminUser) {
+    Write-Host "3. Prüfung des Benutzers: $AdminUserName"
+}
+else {
+    Write-Host "3. Prüfung des Benutzers: aus"
+}
+$Bestaetigung = ""
+while ($Bestaetigung -notin @("j", "n")) {
+    $Bestaetigung = (Read-Host "Sollen die Einstellungen mit diesen Angaben auf diesem Client gesetzt werden? (j/n)").Trim().ToLower()
+}
+if ($Bestaetigung -eq "n") {
+    Write-Host "Abgebrochen, es wurde nichts geändert." -ForegroundColor Yellow
+    return
+}
+
+## Logordner anlegen
+if (-not (Test-Path -Path $LogFolder)) {
+    New-Item -Path $LogFolder -ItemType Directory -Force | Out-Null
+}
+
+## Write-Log Funktion
+function Write-Log {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet("INFO", "OK", "WARN", "ERROR")][string]$Level = "INFO"
+    )
+    $Line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Message
+    $Color = switch ($Level) {
+        "OK"    { "Green" }
+        "WARN"  { "Yellow" }
+        "ERROR" { "Red" }
+        default { "White" }
+    }
+    Write-Host $Line -ForegroundColor $Color
+    Add-Content -Path $LogFile -Value $Line
+}
+
+# Hauptblock: Administratorprüfung
+
+$CurrentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $CurrentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Log -Message "Das Skript muss als Administrator ausgeführt werden." -Level "ERROR"
+    return
+}
+
+# Hauptblock: WinRM-Dienst
+
+## Starttyp auf Automatisch setzen
+try {
+    Set-Service -Name "WinRM" -StartupType Automatic -ErrorAction Stop
+    Write-Log -Message "Dienst WinRM: Starttyp auf Automatisch gesetzt." -Level "OK"
+}
+catch {
+    Write-Log -Message "Starttyp von WinRM konnte nicht gesetzt werden: $($_.Exception.Message)" -Level "ERROR"
+    return
+}
+
+## Dienst starten
+try {
+    Start-Service -Name "WinRM" -ErrorAction Stop
+    Write-Log -Message "Dienst WinRM gestartet." -Level "OK"
+}
+catch {
+    Write-Log -Message "WinRM konnte nicht gestartet werden: $($_.Exception.Message)" -Level "ERROR"
+    return
+}
+
+# Hauptblock: PowerShell Remoting aktivieren
+
+try {
+    Enable-PSRemoting -Force -SkipNetworkProfileCheck -ErrorAction Stop | Out-Null
+    Write-Log -Message "PowerShell Remoting aktiviert (Listener angelegt)." -Level "OK"
+}
+catch {
+    Write-Log -Message "Enable-PSRemoting fehlgeschlagen: $($_.Exception.Message)" -Level "ERROR"
+    return
+}
+
+# Hauptblock: Firewall
+
+## Standardregeln für WinRM deaktivieren
+$DefaultRules = Get-NetFirewallRule -Name "WINRM-HTTP-In-TCP*" -ErrorAction SilentlyContinue
+if ($DefaultRules) {
+    $DefaultRules | Disable-NetFirewallRule
+    Write-Log -Message "Standard-Firewallregeln für WinRM deaktiviert: $($DefaultRules.Name -join ', ')" -Level "OK"
+}
+else {
+    Write-Log -Message "Keine Standard-Firewallregeln für WinRM gefunden." -Level "INFO"
+}
+
+## Eigene Regeln neu anlegen
+Get-NetFirewallRule -DisplayName $RuleNameWinRM -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+Get-NetFirewallRule -DisplayName $RuleNamePing -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+
+### Regel WinRM TCP 5985
+try {
+    New-NetFirewallRule -DisplayName $RuleNameWinRM -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5985 -LocalAddress $ClientNetworks -RemoteAddress $AdminIP -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+    Write-Log -Message "Firewallregel '$RuleNameWinRM' angelegt (Quelle: $($AdminIP -join ', '), lokale Adressen: $($ClientNetworks -join ', '))." -Level "OK"
+}
+catch {
+    Write-Log -Message "Firewallregel WinRM fehlgeschlagen: $($_.Exception.Message)" -Level "ERROR"
+    return
+}
+
+### Regel Ping ICMPv4
+try {
+    New-NetFirewallRule -DisplayName $RuleNamePing -Direction Inbound -Action Allow -Protocol ICMPv4 -IcmpType 8 -LocalAddress $ClientNetworks -RemoteAddress $AdminIP -Profile Any -Enabled True -ErrorAction Stop | Out-Null
+    Write-Log -Message "Firewallregel '$RuleNamePing' angelegt (Quelle: $($AdminIP -join ', '), lokale Adressen: $($ClientNetworks -join ', '))." -Level "OK"
+}
+catch {
+    Write-Log -Message "Firewallregel Ping fehlgeschlagen: $($_.Exception.Message)" -Level "ERROR"
+    return
+}
+
+# Hauptblock: Prüfung lokaler Administrator-Benutzer
+
+if ($CheckAdminUser) {
+
+    ## Administratorengruppe über die SID ermitteln (deutsch: Administratoren, englisch: Administrators)
+    try {
+        $AdminGroup = Get-LocalGroup -SID $AdminGroupSid -ErrorAction Stop
+        Write-Log -Message "Lokale Administratorengruppe gefunden: $($AdminGroup.Name)" -Level "INFO"
+    }
+    catch {
+        Write-Log -Message "Lokale Administratorengruppe konnte nicht ermittelt werden: $($_.Exception.Message)" -Level "ERROR"
+        $AdminGroup = $null
+    }
+
+    ## Benutzer prüfen
+    $AdminUser = Get-LocalUser -Name $AdminUserName -ErrorAction SilentlyContinue
+    if ($AdminUser) {
+        Write-Log -Message "Benutzer $AdminUserName existiert (Aktiviert: $($AdminUser.Enabled))." -Level "OK"
+
+        ### Gruppenmitgliedschaft prüfen
+        if ($AdminGroup) {
+            $IsMember = Get-LocalGroupMember -SID $AdminGroupSid -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $AdminUser.SID }
+            if ($IsMember) {
+                Write-Log -Message "Benutzer $AdminUserName ist Mitglied der Gruppe $($AdminGroup.Name)." -Level "OK"
+            }
+            else {
+                Write-Log -Message "Benutzer $AdminUserName ist NICHT Mitglied der Gruppe $($AdminGroup.Name)." -Level "WARN"
+            }
+        }
+    }
+    else {
+        Write-Log -Message "Benutzer $AdminUserName existiert auf diesem Client nicht." -Level "WARN"
+    }
+}
+else {
+    Write-Log -Message "Prüfung des lokalen Administrator-Benutzers ist deaktiviert." -Level "INFO"
+}
+
+# Hauptblock: Prüfung
+
+## Dienststatus
+$Service = Get-Service -Name "WinRM"
+Write-Log -Message "WinRM Status: $($Service.Status), Starttyp: $($Service.StartType)" -Level "INFO"
+
+## Lokaler WinRM-Test
+try {
+    Test-WSMan -ComputerName "localhost" -ErrorAction Stop | Out-Null
+    Write-Log -Message "Test-WSMan localhost erfolgreich." -Level "OK"
+}
+catch {
+    Write-Log -Message "Test-WSMan localhost fehlgeschlagen: $($_.Exception.Message)" -Level "ERROR"
+}
+
+## Aktive eigene Firewallregeln
+Get-NetFirewallRule -DisplayName "Enable PS Remoting*" | Select-Object DisplayName, Enabled, Direction, Action | Format-Table -AutoSize
+
+Write-Log -Message "Fertig. Log: $LogFile" -Level "INFO"
+'@
+
 function Get-WolInfoInhalt {
     $inhalt = [System.Collections.Generic.List[object]]::new()
 
@@ -1697,7 +1966,8 @@ function Get-WolInfoInhalt {
     @{ T = 'i'; X = '**Aufwecken (Modul WOL):** Wake-on-LAN im BIOS/UEFI und in der Netzwerkkarte aktiv, Gerät per Kabel, MAC der weckenden Netzwerkkarte.' }
     @{ T = 'i'; X = '**Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen:** WinRM (TCP 5985) und Administratorrechte auf dem Ziel, Windows-Geräte. **KuDo-Informationen bei Linux:** SSH (TCP 22), Posh-SSH und ein Benutzer mit Kennwort, kein Root nötig.' }
     @{ T = 'i'; X = '**OU wählen:** Rechner in der Domäne, kein RSAT nötig.' }
-    @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, ebenso die Hilfedatei NET-COCKPIT-Hilfe.ps1 mit den Reitern der Module (die Info lädt sie beim Öffnen, die Module müssen dafür nicht gestartet sein), die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
+    @{ T = 'i'; X = '**Dateien:** Alle Module, die Hilfedatei NET-COCKPIT-Hilfe.ps1 und bei WaToKi der Unterordner WaToKi liegen im selben Ordner wie das NET-COCKPIT.' }
+    @{ T = 'i'; X = '**Start über start.ps1:** Das Cockpit lädt ein Modul beim ersten Aufruf vom Server (Ladefenster) und prüft es gegen seine Signatur. Ohne gültige Signatur wird nichts geladen.' }
     @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
     @{ T = 'h'; X = 'Log' }
     @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
@@ -1759,13 +2029,15 @@ function Get-WolInfoInhalt {
         ) }
         @{ Titel = 'Freischaltung lokal (Skript)'; Bloecke = @(
             @{ T = 'h'; X = 'Wofür?' }
-            @{ T = 'p'; X = 'Grundfreischaltung für eine Workstation ohne Domäne und ohne Intune: WinRM (TCP 5985) und Ping, nur vom Admin-PC aus. Läuft lokal auf dem Client mit dem Skript **Enable-PSRemoting_v1.4_2026-11-03.ps1**.' }
+            @{ T = 'p'; X = 'Grundfreischaltung für eine Workstation ohne Domäne und ohne Intune: WinRM (TCP 5985) und Ping, nur vom Admin-PC aus. Das Skript läuft lokal auf dem Client.' }
             @{ T = 'h'; X = 'Ablauf' }
-            @{ T = 'i'; X = 'Auf dem Client PowerShell ISE als Administrator öffnen.' }
-            @{ T = 'i'; X = 'Skriptinhalt einfügen und auf Play klicken.' }
+            @{ T = 'i'; X = 'Skript unten mit **Kopieren** in die Zwischenablage holen.' }
+            @{ T = 'i'; X = 'Auf dem Client PowerShell ISE als Administrator öffnen, das Skript einfügen und auf Play klicken.' }
             @{ T = 'i'; X = 'Die Fragen beantworten: **CLIENT-NETZ**, **ADMIN-IP**, Benutzerprüfung (j/n) mit Benutzername.' }
             @{ T = 'i'; X = 'Die Zusammenfassung mit **j** bestätigen.' }
             @{ T = 'i'; X = 'Das Skript setzt den Dienst WinRM auf Automatisch, aktiviert Remoting und legt die zwei Firewallregeln an. Log: **C:\Temp\WinRM-Setup**.' }
+            @{ T = 'h'; X = 'Skript' }
+            @{ T = 'c'; X = $script:InfoSkriptLokal }
         ) }
         @{ Titel = 'Prüfen und Namensauflösung'; Bloecke = @(
             @{ T = 'h'; X = 'Prüfen (alle Varianten), auf dem Admin-PC' }
@@ -1798,7 +2070,7 @@ function Get-WolInfoInhalt {
     }
 
     ### Reihenfolge der Reiter: wie die Menüleiste
-    $reihenfolge = 'Überblick', 'Scan & Status', 'Tabelle', 'Geräteliste', 'Aktionen', 'Module', 'Werkzeuge', 'Ansicht', 'Optionen', 'Voraussetzungen'
+    $reihenfolge = 'Überblick', 'Voraussetzungen', 'Scan & Status', 'Tabelle', 'Geräteliste', 'Aktionen', 'Module', 'Werkzeuge', 'Ansicht', 'Optionen'
     return @($reihenfolge | ForEach-Object { $t = $_; $inhalt | Where-Object { $_.Titel -eq $t } })
 }
 
@@ -1832,6 +2104,32 @@ function New-WolInfoDokument {
     $dok.PagePadding = [System.Windows.Thickness]::new(10)
     $treffer = 0
     foreach ($b in $Bloecke) {
+        ### Codeblock mit Kopieren-Knopf darüber (Typ c)
+        if ($b.T -eq 'c') {
+            $feld = [System.Windows.Controls.TextBox]::new()
+            $feld.Text = [string]$b.X
+            $feld.IsReadOnly = $true
+            $feld.FontFamily = [System.Windows.Media.FontFamily]::new('Consolas')
+            $feld.FontSize = 12
+            $feld.Background = $farben.ConvertFromString('#F1F4F9')
+            $feld.Padding = [System.Windows.Thickness]::new(8)
+            $feld.TextWrapping = [System.Windows.TextWrapping]::NoWrap
+            $feld.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+            $feld.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Disabled
+            $knopf = [System.Windows.Controls.Button]::new()
+            $knopf.Content = 'Kopieren'
+            $knopf.Tag = [string]$b.X
+            $knopf.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
+            $knopf.Padding = [System.Windows.Thickness]::new(14, 3, 14, 3)
+            $knopf.Margin = [System.Windows.Thickness]::new(0, 4, 0, 4)
+            $knopf.Add_Click({ [System.Windows.Clipboard]::SetText([string]$this.Tag); $this.Content = 'Kopiert' })
+            $feldPanel = [System.Windows.Controls.StackPanel]::new()
+            $feldPanel.Margin = [System.Windows.Thickness]::new(14, 2, 0, 8)
+            [void]$feldPanel.Children.Add($knopf)
+            [void]$feldPanel.Children.Add($feld)
+            [void]$dok.Blocks.Add([System.Windows.Documents.BlockUIContainer]::new($feldPanel))
+            continue
+        }
         $absatz = [System.Windows.Documents.Paragraph]::new()
         $absatz.Margin = [System.Windows.Thickness]::new(0, 2, 0, 4)
         $text = [string]$b.X
@@ -1905,6 +2203,7 @@ function Show-WolInfo {
         $seiten = @(if ($r.Unter) { $r.Unter } else { @{ Titel = $r.Titel; Bloecke = $r.Bloecke } })
         $box = [System.Windows.Controls.RichTextBox]::new()
         $box.IsReadOnly = $true
+        $box.IsDocumentEnabled = $true
         $box.BorderThickness = [System.Windows.Thickness]::new(0)
         $box.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
         $tab = [System.Windows.Controls.TabItem]::new()
