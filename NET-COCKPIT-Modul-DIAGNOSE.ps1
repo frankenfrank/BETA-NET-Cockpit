@@ -423,24 +423,3 @@ function script:Show-WolModulDIAGNOSE {
     $script:DiagFenster = $f
     $f.Show()
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['DIAGNOSE'] = {
-    @{ Titel = 'Diagnose'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Zeigt per WinRM **Ereignislog, Dienste und Prozesse** eines Geräts, ohne RDP. Das Fenster öffnet sich über **Module > Diagnose** und bleibt neben der Tabelle offen. Jede Anzeige öffnet ein eigenes Fenster pro Gerät und Art.' }
-        @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**Auf dem Zielgerät:** WinRM aktiv (Enable-PSRemoting -Force) und ein Konto mit Administratorrechten. Das Gerät muss grün sein, es muss genau ein Gerät markiert sein.' }
-        @{ T = 'i'; X = '**Konto:** wie bei den anderen Modulen das angemeldete Windows-Konto oder das Konto der Spalte "Konto" (Optionen > Konto für markierte Geräte). Geräte ohne Hostname werden per IP angesprochen, dafür fragt das Cockpit Konto und Kennwort ab (und TrustedHosts, Optionen > Verbindung).' }
-        @{ T = 'h'; X = 'Anzeigen' }
-        @{ T = 'i'; X = '**Ereignislog...:** Auswahl von Log (System, Application, Security, Setup), Stufe (Kritisch und Fehler, Fehler und Warnungen, Alle) und Zeitraum (1 Stunde bis 30 Tage), höchstens 500 Einträge. Ein Klick auf eine Zeile zeigt die ganze Meldung. Das Filterfeld sucht in allen Spalten.' }
-        @{ T = 'i'; X = '**Dienste...:** Name, Anzeigename, Status, Starttyp und Konto. Starten, Stoppen und Neu starten wirken auf den markierten Dienst und fragen vorher nach.' }
-        @{ T = 'i'; X = '**Prozesse...:** Name, PID, CPU in Prozent (Messung über eine Sekunde), RAM in MB, Threads und Benutzer. Task beenden wirkt auf den markierten Prozess und fragt vorher nach.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Sortieren:** per Klick auf den Spaltennamen. **Aktualisieren** liest die Liste neu; nach einer Aktion wird die Liste automatisch neu geladen.' }
-        @{ T = 'i'; X = '**Warteschlange:** Abfragen laufen wie alle Aufträge über die Warteschlange des NET-COCKPIT (Parallelität in den Optionen). Fehler stehen kurz im Fenster, der volle Text in der Logdatei.' }
-        @{ T = 'i'; X = '**Security-Log:** braucht Administratorrechte auf dem Gerät. Das Modul legt keine Spalten in der Tabelle an und speichert nichts.' }
-        @{ T = 'w'; X = 'Noch nicht getestet: alle Abfragen gegen echte Geräte, die Fenster und die Spaltendarstellung.' }
-    ) }
-}

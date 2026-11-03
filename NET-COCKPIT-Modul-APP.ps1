@@ -1455,35 +1455,3 @@ function script:Show-WolModulAPP {
     $f.Show()
     Set-WolModulOffen -Key 'APP' -Offen $true
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['APP'] = {
-    @{ Titel = 'APP-Updates'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Sucht und installiert **Programm-Updates (WinGet)** auf den markierten, grünen Geräten, ohne automatischen Neustart. Das Fenster öffnet sich über **Module > APP** und bleibt neben der Tabelle offen.' }
-        @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**Auf jedem Zielgerät einmalig,** in Windows PowerShell 5.1 als Administrator (nicht pwsh): Enable-PSRemoting -Force' }
-        @{ T = 'i'; X = '**PowerShell 7 und das Modul Microsoft.WinGet.Client** richtet der Knopf "WinGet-Modul nachinstallieren" ein (das Gerät braucht dafür Internetzugang).' }
-        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten, Port 5985 erreichbar.' }
-        @{ T = 'h'; X = 'Knöpfe' }
-        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart, Neustart ausstehend, geplanter Neustart, Modul, WinGet-Version, WAU (Ja = normale Installation, Intune = Intune-Variante, Nein) und verfügbare Programm-Updates.' }
-        @{ T = 'i'; X = '**App-Updates installieren:** öffnet eine Liste mit den Updates aller markierten Geräte (aus dem letzten Status prüfen, jedes Programm einmal, mit "x von n" Geräten) mit Haken, Alle markieren und Keine markieren. Microsoft.PowerShell ist nicht vorangehakt. Installiert wird nur das Angehakte und nur auf Geräten, die das Update haben; andere Geräte bekommen "Kein gewähltes Update - übersprungen". Geräte ohne Statusdaten: "Bitte zuerst Status prüfen". Still, nie automatischer Neustart; ist einer nötig, steht es im Status (auslösen über Aktionen > Neustart planen).' }
-        @{ T = 'i'; X = '**Programm installieren...:** WinGet-Id eingeben, zum Beispiel 7zip.7zip.' }
-        @{ T = 'i'; X = '**Installierte Programme anzeigen...:** liest die installierten Programme (WinGet) der markierten Geräte und zeigt sie gemeinsam in einer Liste mit Suche, Filter "Nur Quelle winget" und CSV-Export (nur Anzeige, es wird nichts verändert).' }
-        @{ T = 'i'; X = '**Programm deinstallieren...:** liest die installierten Programme eines markierten Geräts, danach ein Programm auswählen und still deinstallieren.' }
-        @{ T = 'i'; X = '**WinGet-Modul nachinstallieren:** PowerShell 7 und Modul auf dem Zielgerät einrichten. Danach läuft automatisch Status prüfen für dieses Gerät.' }
-        @{ T = 'i'; X = '**WAU installieren...:** ein Dialog mit der Ausschlussliste (vorbelegt mit dem Standardvorschlag, eine WinGet-Id je Zeile, * als Platzhalter) gilt für alle markierten Geräte. Installiert wird Winget-AutoUpdate (Romanitho.Winget-AutoUpdate) mit Updates monatlich und bei Anmeldung und Benachrichtigung nur bei Erfolg; die Liste landet in C:\Program Files\Winget-AutoUpdate\excluded_apps.txt. Geräte, auf denen WAU schon läuft (auch die Intune-Variante), werden übersprungen: "WAU schon vorhanden - übersprungen".' }
-        @{ T = 'i'; X = '**WAU-Ausschlüsse bearbeiten...:** liest die Liste der markierten Geräte mit normaler WAU (zuerst Status prüfen), zeigt sie zum Bearbeiten und schreibt sie auf alle markierten Geräte; ohne Neuinstallation. Unterscheiden sich die Listen, steht ein Hinweis im Dialog. Geräte mit der Intune-Variante werden nicht geändert ("Intune-Variante, Liste über Intune pflegen").' }
-        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und das Log dieses Geräts.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, WinGet-Modul, App-Updates, WinGet-Version und WAU sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
-        @{ T = 'i'; X = '**Nur** maschinenweit installierte Programme aus der Quelle winget.' }
-        @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP:** Optionen > Verbindung (TrustedHosts) und ein lokales Konto (Optionen > Konto für markierte Geräte, Gerätename\Benutzer).' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
-        @{ T = 'i'; X = '**WAU-Verlauf:** die letzten 100 Updates aus dem Log von Winget-AutoUpdate. Gesucht wird in C:\Program Files\Winget-AutoUpdate\logs\updates.log (Domänengeräte) und C:\Program Files\Winget-Autoupdate-aaS\Winget-AutoUpdate\logs\updates.log (Intune-Clients).' }
-        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt. Auf dem Zielgerät liegen Cockpit-Verlauf (C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv) (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff in NET-COCKPIT umbenannt) und Installationslog (C:\Windows\Temp\NetCockpitAppInstall.log).' }
-        @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version, WinGet-Modul, WinGet-Version und WAU bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und App-Updates werden nicht gespeichert.' }
-        @{ T = 'w'; X = 'Das Modul ist noch nicht vollständig auf echten Geräten getestet.' }
-    ) }
-}

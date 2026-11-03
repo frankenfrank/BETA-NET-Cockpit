@@ -648,30 +648,3 @@ function script:Show-WolModulOS {
     $f.Show()
     Set-WolModulOffen -Key 'OS' -Offen $true
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['OS'] = {
-    @{ Titel = 'OS-Updates'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Sucht und installiert **Windows-Updates** (PSWindowsUpdate) auf den markierten, grünen Geräten, ohne RDP. Das Fenster öffnet sich über **Module > OS** und bleibt neben der Tabelle offen.' }
-        @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**Auf jedem Zielgerät,** in PowerShell als Administrator: Enable-PSRemoting -Force. Bei Clients im Netzwerkprofil "Öffentlich" zusätzlich: Enable-PSRemoting -Force -SkipNetworkProfileCheck' }
-        @{ T = 'i'; X = '**Modul PSWindowsUpdate** auf dem Zielgerät: einfacher per Knopf "Update-Modul nachinstallieren", von Hand mit Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force und Install-Module -Name PSWindowsUpdate -Scope AllUsers -Force. Das Gerät braucht dafür Internetzugang zur PSGallery.' }
-        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten (oder ein Konto je Gerät über Optionen > Konto für markierte Geräte), Port 5985 erreichbar.' }
-        @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP** (Kerberos geht dort nicht): Optionen > Verbindung (TrustedHosts) und ein lokales Konto im Format Gerätename\Benutzer. Bei anderen lokalen Administratorkonten als dem eingebauten Administrator kann Windows den Fernzugriff filtern ("Zugriff verweigert").' }
-        @{ T = 'h'; X = 'Knöpfe' }
-        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart (mit Dauer), Neustart ausstehend, geplanter Neustart, Modul, verfügbare Updates und Update-Verlauf.' }
-        @{ T = 'i'; X = '**Updates installieren:** ohne automatischen Neustart (-IgnoreReboot). Ist ein Neustart nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
-        @{ T = 'i'; X = '**Updates installieren und bei Bedarf neu starten:** Neustart nach 30 Sekunden, nur wenn nötig (mit Rückfrage).' }
-        @{ T = 'i'; X = '**Update-Modul nachinstallieren:** PSWindowsUpdate auf Geräten, wo es fehlt. Danach läuft automatisch Status prüfen für dieses Gerät.' }
-        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Update-Verlauf ohne Defender-Definitionen bei "Letzte Updates" (letzte 50 Einträge) und das Log dieses Geräts.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, Update-Modul, OS-Updates und Letzte Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
-        @{ T = 'i'; X = '**Suche und Installation** laufen als kurze geplante Aufgabe (SYSTEM, ohne Trigger) auf dem Gerät, weil Windows das aus einer Remote-Sitzung nicht erlaubt. Sie wird nach dem Ende gelöscht. Läuft schon eine Installation, hängt sich das Cockpit an die laufende an. Wird das Cockpit währenddessen beendet, läuft sie auf dem Gerät weiter.' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit APP- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
-        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-OS\yyyyMMdd_Gerät_os-log.txt, im Detailfenster der Reiter Log.' }
-        @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version und Update-Modul bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und die Anzahl der Updates werden nicht gespeichert.' }
-        @{ T = 'w'; X = 'Noch nicht getestet: Clients und die Uhrzeit-Umrechnung im Update-Verlauf.' }
-    ) }
-}

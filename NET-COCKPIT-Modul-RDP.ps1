@@ -511,28 +511,3 @@ function script:Show-WolModulRDP {
     $f.Show()
     if (@(Get-WolMarkierte).Count -gt 0) { Connect-WolRdMarkierte }
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['RDP'] = {
-    @{ Titel = 'RDP'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Öffnet **Remotedesktop-Verbindungen** in einem eigenen Fenster (kein Vollbild) mit **einem Tab je Verbindung**. Das Fenster **RDP-MODUL** öffnet sich über **Module > RDP**, ist eigenständig (eigenes Taskleistensymbol) und bleibt nicht vor dem Cockpit liegen.' }
-        @{ T = 'h'; X = 'Ablauf' }
-        @{ T = 'i'; X = '**Geräte markieren, Module > RDP** (oder im offenen Fenster **Markierte verbinden**): Jedes markierte Gerät bekommt einen Tab. Ziel ist der Hostname, sonst die IP-Adresse.' }
-        @{ T = 'i'; X = '**Konto:** Konto und Kennwort kommen aus der Spalte "Konto" (Optionen > Konto für markierte Geräte). Das Modul fragt keine Kennwörter ab: Fehlt bei einem Gerät mit Konto das Kennwort (zum Beispiel nach einem Neustart), meldet das Modul die Geräte, nichts startet. Ohne Eintrag in der Spalte gilt das angemeldete Windows-Konto: Windows gibt dessen Kennwort nicht heraus, deshalb fragt das Modul es einmal pro Sitzung ab (nur im Arbeitsspeicher).' }
-        @{ T = 'i'; X = '**Tab-Kopf:** ● verbunden, ◌ verbindet, ○ getrennt. Das ✕ im Tab trennt die Verbindung und schließt den Tab.' }
-        @{ T = 'i'; X = '**Abmelden:** meldet nur den Benutzer des gerade angezeigten Tabs auf dem Server ab, es gibt keinen Neustart und kein Herunterfahren. Das Modul sucht dafür die RDP-Sitzung des Kontos auf dem Server (WinRM, quser) und beendet sie mit logoff, vorher kommt eine Rückfrage, danach schließt sich der Tab. Gibt es mehrere aktive RDP-Sitzungen desselben Kontos, passiert nichts, dann bitte im RDP-Fenster selbst abmelden. **Tab schließen** oder **Fenster schließen** trennt dagegen nur die Verbindung, die Sitzung bleibt auf dem Server bestehen.' }
-        @{ T = 'i'; X = '**Neu verbinden:** baut die Verbindung des gerade angezeigten Tabs neu auf, mit denselben Zugangsdaten. Der Benutzer bleibt auf dem Server angemeldet, nur die Verbindung wird getrennt und neu hergestellt.' }
-        @{ T = 'i'; X = '**Gerät schon verbunden:** Markierst du ein Gerät, das schon einen Tab mit bestehender oder laufender Verbindung hat, springt das Modul zu diesem Tab, statt einen neuen zu öffnen. Ein getrennter Tab (○) wird durch den neuen ersetzt.' }
-        @{ T = 'i'; X = '**Auflösung:** folgt der Fenstergröße, auch beim Vergrößern des Fensters.' }
-        @{ T = 'i'; X = '**Zwischenablage:** wird umgeleitet, sonst nichts (keine Laufwerke, Drucker oder Smartcards).' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Voraussetzung:** Remotedesktop auf dem Ziel aktiv (TCP 3389) und das Konto darf sich per Remotedesktop anmelden. Das Steuerelement mstscax.dll ist Bestandteil von Windows.' }
-        @{ T = 'i'; X = '**Ohne Abfrage per GPO:** Computerkonfiguration > Administrative Vorlagen > System > Delegierung von Anmeldeinformationen > **Delegierung von Standardanmeldeinformationen zulassen**, TERMSRV/* eintragen, gpupdate /force und neu anmelden. Die Schritte stehen auch im Fenster unter **Hinweis zur Anmeldung**.' }
-        @{ T = 'i'; X = '**Kennwort:** geht nur im Arbeitsspeicher an das RDP-Steuerelement und wird nicht gespeichert.' }
-        @{ T = 'i'; X = '**Fenster schließen** trennt alle Verbindungen (mit Rückfrage, solange Verbindungen bestehen). Beendest du das NET-COCKPIT, kommt dieselbe Rückfrage und das RDP-Fenster schließt sich mit.' }
-        @{ T = 'i'; X = '**Log:** Start und Ende einer Verbindung stehen im Log des NET-COCKPIT.' }
-        @{ T = 'w'; X = 'Aus dem Testskript übernommen (Verbindung, Tabs, Zwischenablage, Auflösung getestet). Neu und noch nicht getestet: Abmelden, Aufruf über das Menü, Kennwortabfrage für das angemeldete Konto, Konto aus der Spalte, mehrere Tabs gleichzeitig.' }
-    ) }
-}

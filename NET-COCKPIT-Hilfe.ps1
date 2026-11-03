@@ -1,0 +1,238 @@
+# NET-COCKPIT-Hilfe.ps1
+<#
+.SYNOPSIS
+    Hilfetexte der Module für die Info des NET-COCKPIT (Menü Hilfe > Info / Voraussetzungen)
+
+.DESCRIPTION
+    Wird vom NET-COCKPIT geladen, wenn die Info geöffnet wird, damit die Reiter aller Module zu lesen sind, ohne die Module zu starten.
+    - Liegt die Datei im Ordner des NET-COCKPIT (Dev-Ordner), wird sie direkt gelesen; sonst holt das NET-COCKPIT sie einmal vom Server (Ladefenster, Signaturprüfung)
+    - Pro Modul ein Block $script:ModulInfo['SCHLÜSSEL']; die Texte stehen nur hier, nicht in den Modulen
+    - Blöcke je Reiter: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten
+    - Reihenfolge der Reiter: wie die Module im NET-COCKPIT geführt werden
+    Die Datei enthält nur Text und speichert nichts.
+#>
+
+# OS-Updates
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['OS'] = {
+    @{ Titel = 'OS-Updates'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Sucht und installiert **Windows-Updates** (PSWindowsUpdate) auf den markierten, grünen Geräten, ohne RDP. Das Fenster öffnet sich über **Module > OS** und bleibt neben der Tabelle offen.' }
+        @{ T = 'h'; X = 'Voraussetzungen' }
+        @{ T = 'i'; X = '**Auf jedem Zielgerät,** in PowerShell als Administrator: Enable-PSRemoting -Force. Bei Clients im Netzwerkprofil "Öffentlich" zusätzlich: Enable-PSRemoting -Force -SkipNetworkProfileCheck' }
+        @{ T = 'i'; X = '**Modul PSWindowsUpdate** auf dem Zielgerät: einfacher per Knopf "Update-Modul nachinstallieren", von Hand mit Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force und Install-Module -Name PSWindowsUpdate -Scope AllUsers -Force. Das Gerät braucht dafür Internetzugang zur PSGallery.' }
+        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten (oder ein Konto je Gerät über Optionen > Konto für markierte Geräte), Port 5985 erreichbar.' }
+        @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP** (Kerberos geht dort nicht): Optionen > Verbindung (TrustedHosts) und ein lokales Konto im Format Gerätename\Benutzer. Bei anderen lokalen Administratorkonten als dem eingebauten Administrator kann Windows den Fernzugriff filtern ("Zugriff verweigert").' }
+        @{ T = 'h'; X = 'Knöpfe' }
+        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart (mit Dauer), Neustart ausstehend, geplanter Neustart, Modul, verfügbare Updates und Update-Verlauf.' }
+        @{ T = 'i'; X = '**Updates installieren:** ohne automatischen Neustart (-IgnoreReboot). Ist ein Neustart nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
+        @{ T = 'i'; X = '**Updates installieren und bei Bedarf neu starten:** Neustart nach 30 Sekunden, nur wenn nötig (mit Rückfrage).' }
+        @{ T = 'i'; X = '**Update-Modul nachinstallieren:** PSWindowsUpdate auf Geräten, wo es fehlt. Danach läuft automatisch Status prüfen für dieses Gerät.' }
+        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Update-Verlauf ohne Defender-Definitionen bei "Letzte Updates" (letzte 50 Einträge) und das Log dieses Geräts.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, Update-Modul, OS-Updates und Letzte Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
+        @{ T = 'i'; X = '**Suche und Installation** laufen als kurze geplante Aufgabe (SYSTEM, ohne Trigger) auf dem Gerät, weil Windows das aus einer Remote-Sitzung nicht erlaubt. Sie wird nach dem Ende gelöscht. Läuft schon eine Installation, hängt sich das Cockpit an die laufende an. Wird das Cockpit währenddessen beendet, läuft sie auf dem Gerät weiter.' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit APP- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-OS\yyyyMMdd_Gerät_os-log.txt, im Detailfenster der Reiter Log.' }
+        @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version und Update-Modul bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und die Anzahl der Updates werden nicht gespeichert.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: Clients und die Uhrzeit-Umrechnung im Update-Verlauf.' }
+    ) }
+}
+
+# APP-Updates
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['APP'] = {
+    @{ Titel = 'APP-Updates'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Sucht und installiert **Programm-Updates (WinGet)** auf den markierten, grünen Geräten, ohne automatischen Neustart. Das Fenster öffnet sich über **Module > APP** und bleibt neben der Tabelle offen.' }
+        @{ T = 'h'; X = 'Voraussetzungen' }
+        @{ T = 'i'; X = '**Auf jedem Zielgerät einmalig,** in Windows PowerShell 5.1 als Administrator (nicht pwsh): Enable-PSRemoting -Force' }
+        @{ T = 'i'; X = '**PowerShell 7 und das Modul Microsoft.WinGet.Client** richtet der Knopf "WinGet-Modul nachinstallieren" ein (das Gerät braucht dafür Internetzugang).' }
+        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten, Port 5985 erreichbar.' }
+        @{ T = 'h'; X = 'Knöpfe' }
+        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart, Neustart ausstehend, geplanter Neustart, Modul, WinGet-Version, WAU (Ja = normale Installation, Intune = Intune-Variante, Nein) und verfügbare Programm-Updates.' }
+        @{ T = 'i'; X = '**App-Updates installieren:** öffnet eine Liste mit den Updates aller markierten Geräte (aus dem letzten Status prüfen, jedes Programm einmal, mit "x von n" Geräten) mit Haken, Alle markieren und Keine markieren. Microsoft.PowerShell ist nicht vorangehakt. Installiert wird nur das Angehakte und nur auf Geräten, die das Update haben; andere Geräte bekommen "Kein gewähltes Update - übersprungen". Geräte ohne Statusdaten: "Bitte zuerst Status prüfen". Still, nie automatischer Neustart; ist einer nötig, steht es im Status (auslösen über Aktionen > Neustart planen).' }
+        @{ T = 'i'; X = '**Programm installieren...:** WinGet-Id eingeben, zum Beispiel 7zip.7zip.' }
+        @{ T = 'i'; X = '**Installierte Programme anzeigen...:** liest die installierten Programme (WinGet) der markierten Geräte und zeigt sie gemeinsam in einer Liste mit Suche, Filter "Nur Quelle winget" und CSV-Export (nur Anzeige, es wird nichts verändert).' }
+        @{ T = 'i'; X = '**Programm deinstallieren...:** liest die installierten Programme eines markierten Geräts, danach ein Programm auswählen und still deinstallieren.' }
+        @{ T = 'i'; X = '**WinGet-Modul nachinstallieren:** PowerShell 7 und Modul auf dem Zielgerät einrichten. Danach läuft automatisch Status prüfen für dieses Gerät.' }
+        @{ T = 'i'; X = '**WAU installieren...:** ein Dialog mit der Ausschlussliste (vorbelegt mit dem Standardvorschlag, eine WinGet-Id je Zeile, * als Platzhalter) gilt für alle markierten Geräte. Installiert wird Winget-AutoUpdate (Romanitho.Winget-AutoUpdate) mit Updates monatlich und bei Anmeldung und Benachrichtigung nur bei Erfolg; die Liste landet in C:\Program Files\Winget-AutoUpdate\excluded_apps.txt. Geräte, auf denen WAU schon läuft (auch die Intune-Variante), werden übersprungen: "WAU schon vorhanden - übersprungen".' }
+        @{ T = 'i'; X = '**WAU-Ausschlüsse bearbeiten...:** liest die Liste der markierten Geräte mit normaler WAU (zuerst Status prüfen), zeigt sie zum Bearbeiten und schreibt sie auf alle markierten Geräte; ohne Neuinstallation. Unterscheiden sich die Listen, steht ein Hinweis im Dialog. Geräte mit der Intune-Variante werden nicht geändert ("Intune-Variante, Liste über Intune pflegen").' }
+        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und das Log dieses Geräts.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, WinGet-Modul, App-Updates, WinGet-Version und WAU sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus).' }
+        @{ T = 'i'; X = '**Nur** maschinenweit installierte Programme aus der Quelle winget.' }
+        @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP:** Optionen > Verbindung (TrustedHosts) und ein lokales Konto (Optionen > Konto für markierte Geräte, Gerätename\Benutzer).' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und Treiber-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**WAU-Verlauf:** die letzten 100 Updates aus dem Log von Winget-AutoUpdate. Gesucht wird in C:\Program Files\Winget-AutoUpdate\logs\updates.log (Domänengeräte) und C:\Program Files\Winget-Autoupdate-aaS\Winget-AutoUpdate\logs\updates.log (Intune-Clients).' }
+        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt. Auf dem Zielgerät liegen Cockpit-Verlauf (C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv) (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff in NET-COCKPIT umbenannt) und Installationslog (C:\Windows\Temp\NetCockpitAppInstall.log).' }
+        @{ T = 'i'; X = '**Gespeicherte Werte:** Windows-Version, WinGet-Modul, WinGet-Version und WAU bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Letzter Neustart, Neustart ausstehend und App-Updates werden nicht gespeichert.' }
+        @{ T = 'w'; X = 'Das Modul ist noch nicht vollständig auf echten Geräten getestet.' }
+    ) }
+}
+
+# Treiber-Updates
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['TREIBER'] = {
+    @{ Titel = 'TREIBER-Updates'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Sucht und installiert **Treiber-Updates** für **Dell, HP und Lenovo** auf den markierten, grünen Geräten, ohne RDP. Der PC-Hersteller wird je Gerät erkannt und dessen Tool genutzt: Dell Command | Update, HP Image Assistant, Lenovo LSUClient. Andere Hersteller: "nicht unterstützt". Das Fenster öffnet sich über **Module > TREIBER** und bleibt neben der Tabelle offen.' }
+        @{ T = 'h'; X = 'Voraussetzungen' }
+        @{ T = 'i'; X = '**Auf jedem Zielgerät einmalig,** in PowerShell als Administrator: Enable-PSRemoting -Force. Bei Clients im Netzwerkprofil "Öffentlich" zusätzlich: Enable-PSRemoting -Force -SkipNetworkProfileCheck' }
+        @{ T = 'i'; X = '**Das Gerät braucht Internet** (Hersteller-Server, bei der Tool-Nachinstallation PSGallery bzw. WinGet).' }
+        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten, Port 5985 erreichbar.' }
+        @{ T = 'h'; X = 'Knöpfe' }
+        @{ T = 'i'; X = '**Status prüfen:** PC-Hersteller, Modell, Windows-Version, Neustart, Akkubetrieb, Treiber-Tool und Treiber-Updates.' }
+        @{ T = 'i'; X = '**Treiber-Updates installieren:** mit Rückfrage, still, nie automatischer Neustart. Ist einer nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
+        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. Danach läuft automatisch Status prüfen für dieses Gerät.' }
+        @{ T = 'i'; X = '**BIOS/Firmware einbeziehen:** standardmäßig aus, bei Akkubetrieb Abbruch. Der Schalter gilt für Status prüfen und Installieren.' }
+        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Treiber, Verlauf der Installationen, Tool-Log und das Log dieses Geräts.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, PC-Hersteller, Modell, Treiber-Tool und Treiber-Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus). Die Spalte "Hersteller" des Cockpits ist der Netzwerk-Hersteller aus der MAC-Adresse.' }
+        @{ T = 'i'; X = '**Dell:** gezählt werden nur Updates, die dcu-cli selbst meldet (inventarisiert). Nicht inventarisierte Katalog-Einträge stehen als "(+N)" in der Spalte und im Log.' }
+        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und APP-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
+        @{ T = 'i'; X = '**Aufgaben auf dem Gerät** laufen als SYSTEM und werden nach dem Ende gelöscht. Verlauf und Tool-Log liegen im Ordner C:\ProgramData\NET-COCKPIT (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff dorthin umbenannt).' }
+        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-TREIBER\yyyyMMdd_Gerät_treiber-log.txt' }
+        @{ T = 'i'; X = '**Gespeicherte Werte:** PC-Hersteller, Modell und Treiber-Tool bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Treiber-Updates, Letzter Neustart und Neustart ausstehend werden nicht gespeichert.' }
+        @{ T = 'w'; X = 'Noch nicht an echten Geräten getestet (HP, Lenovo).' }
+    ) }
+}
+
+# Diagnose
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['DIAGNOSE'] = {
+    @{ Titel = 'Diagnose'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Zeigt per WinRM **Ereignislog, Dienste und Prozesse** eines Geräts, ohne RDP. Das Fenster öffnet sich über **Module > Diagnose** und bleibt neben der Tabelle offen. Jede Anzeige öffnet ein eigenes Fenster pro Gerät und Art.' }
+        @{ T = 'h'; X = 'Voraussetzungen' }
+        @{ T = 'i'; X = '**Auf dem Zielgerät:** WinRM aktiv (Enable-PSRemoting -Force) und ein Konto mit Administratorrechten. Das Gerät muss grün sein, es muss genau ein Gerät markiert sein.' }
+        @{ T = 'i'; X = '**Konto:** wie bei den anderen Modulen das angemeldete Windows-Konto oder das Konto der Spalte "Konto" (Optionen > Konto für markierte Geräte). Geräte ohne Hostname werden per IP angesprochen, dafür fragt das Cockpit Konto und Kennwort ab (und TrustedHosts, Optionen > Verbindung).' }
+        @{ T = 'h'; X = 'Anzeigen' }
+        @{ T = 'i'; X = '**Ereignislog...:** Auswahl von Log (System, Application, Security, Setup), Stufe (Kritisch und Fehler, Fehler und Warnungen, Alle) und Zeitraum (1 Stunde bis 30 Tage), höchstens 500 Einträge. Ein Klick auf eine Zeile zeigt die ganze Meldung. Das Filterfeld sucht in allen Spalten.' }
+        @{ T = 'i'; X = '**Dienste...:** Name, Anzeigename, Status, Starttyp und Konto. Starten, Stoppen und Neu starten wirken auf den markierten Dienst und fragen vorher nach.' }
+        @{ T = 'i'; X = '**Prozesse...:** Name, PID, CPU in Prozent (Messung über eine Sekunde), RAM in MB, Threads und Benutzer. Task beenden wirkt auf den markierten Prozess und fragt vorher nach.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Sortieren:** per Klick auf den Spaltennamen. **Aktualisieren** liest die Liste neu; nach einer Aktion wird die Liste automatisch neu geladen.' }
+        @{ T = 'i'; X = '**Warteschlange:** Abfragen laufen wie alle Aufträge über die Warteschlange des NET-COCKPIT (Parallelität in den Optionen). Fehler stehen kurz im Fenster, der volle Text in der Logdatei.' }
+        @{ T = 'i'; X = '**Security-Log:** braucht Administratorrechte auf dem Gerät. Das Modul legt keine Spalten in der Tabelle an und speichert nichts.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: alle Abfragen gegen echte Geräte, die Fenster und die Spaltendarstellung.' }
+    ) }
+}
+
+# WaToKi
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['WATOKI'] = {
+    @{ Titel = 'WaToKi'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Startet die **Wartungsskripte** aus dem Unterordner **WaToKi** neben dem NET-COCKPIT. Das Fenster öffnet sich über **Module > WaToKi** und bleibt neben der Tabelle offen. Rechts steht die Beschreibung aus dem Kopf des gewählten Skripts.' }
+        @{ T = 'h'; X = 'Ablauf' }
+        @{ T = 'i'; X = '**Skript wählen, Starten** (oder Doppelklick): Das Skript läuft in einem eigenen PowerShell-7-Fenster. Es läuft immer nur ein Skript gleichzeitig, **Starten** ist bis zum Ende gesperrt.' }
+        @{ T = 'i'; X = '**Parameter:** Das Modul liest den param-Block des Skripts (ohne es auszuführen) und übergibt nur, was das Skript kennt. **-Ziel** bekommt die markierten Geräte der Tabelle (Hostname, sonst IP), **-Ausgabeordner** den Ordner Modul-WaToKi im Datenordner, **-Anmeldedaten** das Konto der markierten Geräte (ein Konto für alle), **-AnmeldedatenJeZiel** das Konto jedes markierten Geräts einzeln.' }
+        @{ T = 'i'; X = '**Ohne diese Parameter** startet das Skript unverändert und fragt wie bisher selbst nach Gerät und Ablageort.' }
+        @{ T = 'i'; X = '**Ausgabeordner öffnen:** öffnet C:\Temp\NET-COCKPIT_data\Modul-WaToKi im Explorer.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Konto:** Kennt ein Skript den Parameter **-Anmeldedaten**, bekommt es das Konto aus der Spalte "Konto" (Optionen > Konto für markierte Geräte). Das Modul fragt keine Kennwörter ab: Fehlt bei einem Gerät mit Konto das Kennwort (zum Beispiel nach einem Neustart), meldet das Modul die Geräte, nichts startet. Dann das Kennwort im Cockpit pro Gerät setzen und erneut starten. Ohne Eintrag in der Spalte läuft das Skript mit dem angemeldeten Windows-Konto oder fragt selbst. Skripte mit **-AnmeldedatenJeZiel** bekommen für jedes Gerät sein eigenes Konto, Skripte mit nur **-Anmeldedaten** nehmen ein Konto für alle, dort startet bei unterschiedlichen Konten nichts.' }
+        @{ T = 'i'; X = '**Übergabe des Kontos:** über eine verschlüsselte Temp-Datei, die nur dein Windows-Konto auf diesem Rechner lesen kann. Der Startbefehl liest sie ein und löscht sie sofort, nach dem Skriptende löscht das Modul sie noch einmal.' }
+        @{ T = 'i'; X = '**Param-Block:** Er muss im Skript ganz oben stehen, vor Clear-Host. Sonst erkennt das Modul die Parameter nicht.' }
+        @{ T = 'i'; X = '**Spalte Wartungsreihenfolge:** erscheint, wenn im WaToKi-Fenster der Haken **Spalte Wartungsreihenfolge in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und lässt sich direkt in der Tabelle eintippen (Doppelklick in die Zelle). Der Wert wird mit der Geräteliste gespeichert, die Spalte lässt sich filtern und sortieren (als Text, also 10 vor 2).' }
+        @{ T = 'i'; X = '**Log:** Start und Ende eines Skripts stehen im Log des NET-COCKPIT.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: Fenster, Starten, Sperre und Parameterübergabe auf einem echten Rechner.' }
+    ) }
+}
+
+# M365-Wartungs-App
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['M365APP'] = {
+    @{ Titel = 'M365-Wartungs-App'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Legt im **Kunden-Tenant** die Wartungs-App **MAHR-EDV-Wartung** für das M365-Cockpit an oder aktualisiert sie: App-Registrierung, Service Principal, Zertifikat und Berechtigungen. Das Fenster öffnet sich über **Module > M365-Wartungs-App**, zeigt vorher, was installiert und angelegt wird, und bleibt neben der Tabelle offen. Das Modul braucht **keine markierten Geräte**.' }
+        @{ T = 'h'; X = 'Bedienung' }
+        @{ T = 'i'; X = '**Ablauf** (steht im Fenster): Anmeldung im Tenant, App und Service Principal, Zertifikat, Berechtigungen, Tenantinfos speichern, Admin-Consent im Entra-Portal.' }
+        @{ T = 'i'; X = '**PowerShell-Module:** Microsoft.Graph.Authentication und Microsoft.Graph.Applications. Das Fenster zeigt, ob sie installiert sind (**Module prüfen** liest neu). Fehlt eins, fragt das Skript beim Start, ob es für dein Benutzerkonto installiert werden soll (Install-Module -Scope CurrentUser).' }
+        @{ T = 'i'; X = '**Berechtigungen:** die oberen werden immer gesetzt (Microsoft Graph, Anwendungsberechtigungen, nur lesend, außer **User.ReadWrite.All** als Schreibrecht, rot markiert). Darunter lassen sich per **Haken** weitere wählen (beim Öffnen immer aus). Die Haken gelten für den nächsten Start.' }
+        @{ T = 'i'; X = '**Wartungs-App anlegen / aktualisieren...:** startet das Skript in einem eigenen PowerShell-7-Fenster **ohne Administratorrechte**. Dort läuft die Anmeldung per Geräteanmeldung (Global Administrator des Kunden); die Abfragen (PFX-Kennwort, KuDo-Hinweise) stehen im Skriptfenster.' }
+        @{ T = 'i'; X = '**Ordner Tenantinfo öffnen** zeigt C:\WorkDir\M365-Cockpit\M365-Tenantinfo im Explorer, **Entra-Portal öffnen** die App-Registrierungen im Standardbrowser.' }
+        @{ T = 'h'; X = 'Zertifikat und Ablage' }
+        @{ T = 'i'; X = '**Neues Zertifikat** (wenn die App noch keins hat): selbstsigniert, 2 Jahre, im Zertifikatspeicher des Benutzers und als PFX in C:\WorkDir\M365-Cockpit\M365-Tenantinfo\MAHR-EDV-Wartung-Cert. Kennwort und PFX-Datei gehören in den KuDo-Eintrag **M365 Mahr-EDV-Wartung Zertifikatspasswort** des Kunden.' }
+        @{ T = 'i'; X = '**Vorhandenes Zertifikat:** Hat die App schon eins, das auf diesem Rechner fehlt, fordert das Skript auf, die PFX-Datei aus KuDo in den Ordner zu legen. So lässt sich das Skript auch später erneut ausführen, um Berechtigungen nachzuziehen.' }
+        @{ T = 'i'; X = '**Tenantinfos:** C:\WorkDir\M365-Cockpit\M365-Tenantinfo\kunden-tenantinfos.json (Tenant-ID, Client-ID, Domain, PFX-Pfad, Thumbprint je Kunde).' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Ohne Administratorrechte:** Läuft das NET-COCKPIT als Administrator, startet das Modul das Skript mit eingeschränktem Token (runas /trustlevel). Das Skript prüft beim Start selbst und bricht mit einem Hinweis ab, wenn es doch erhöht läuft.' }
+        @{ T = 'i'; X = '**Admin-Consent:** Nach dem Lauf müssen die Berechtigungen im Entra-Portal unter App-Registrierungen > MAHR-EDV-Wartung > API-Berechtigungen bestätigt werden (Seite mit F5 aktualisieren).' }
+        @{ T = 'i'; X = '**Skript:** Das Modul legt es als Temp-Datei ab, es löscht sich beim Start selbst. Das Modul speichert nichts im Datenordner des NET-COCKPIT.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: Fenster, Start ohne Administratorrechte (runas /trustlevel), Lauf des Skripts gegen einen Tenant.' }
+    ) }
+}
+
+# RDP
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['RDP'] = {
+    @{ Titel = 'RDP'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Öffnet **Remotedesktop-Verbindungen** in einem eigenen Fenster (kein Vollbild) mit **einem Tab je Verbindung**. Das Fenster **RDP-MODUL** öffnet sich über **Module > RDP**, ist eigenständig (eigenes Taskleistensymbol) und bleibt nicht vor dem Cockpit liegen.' }
+        @{ T = 'h'; X = 'Ablauf' }
+        @{ T = 'i'; X = '**Geräte markieren, Module > RDP** (oder im offenen Fenster **Markierte verbinden**): Jedes markierte Gerät bekommt einen Tab. Ziel ist der Hostname, sonst die IP-Adresse.' }
+        @{ T = 'i'; X = '**Konto:** Konto und Kennwort kommen aus der Spalte "Konto" (Optionen > Konto für markierte Geräte). Das Modul fragt keine Kennwörter ab: Fehlt bei einem Gerät mit Konto das Kennwort (zum Beispiel nach einem Neustart), meldet das Modul die Geräte, nichts startet. Ohne Eintrag in der Spalte gilt das angemeldete Windows-Konto: Windows gibt dessen Kennwort nicht heraus, deshalb fragt das Modul es einmal pro Sitzung ab (nur im Arbeitsspeicher).' }
+        @{ T = 'i'; X = '**Tab-Kopf:** ● verbunden, ◌ verbindet, ○ getrennt. Das ✕ im Tab trennt die Verbindung und schließt den Tab.' }
+        @{ T = 'i'; X = '**Abmelden:** meldet nur den Benutzer des gerade angezeigten Tabs auf dem Server ab, es gibt keinen Neustart und kein Herunterfahren. Das Modul sucht dafür die RDP-Sitzung des Kontos auf dem Server (WinRM, quser) und beendet sie mit logoff, vorher kommt eine Rückfrage, danach schließt sich der Tab. Gibt es mehrere aktive RDP-Sitzungen desselben Kontos, passiert nichts, dann bitte im RDP-Fenster selbst abmelden. **Tab schließen** oder **Fenster schließen** trennt dagegen nur die Verbindung, die Sitzung bleibt auf dem Server bestehen.' }
+        @{ T = 'i'; X = '**Neu verbinden:** baut die Verbindung des gerade angezeigten Tabs neu auf, mit denselben Zugangsdaten. Der Benutzer bleibt auf dem Server angemeldet, nur die Verbindung wird getrennt und neu hergestellt.' }
+        @{ T = 'i'; X = '**Gerät schon verbunden:** Markierst du ein Gerät, das schon einen Tab mit bestehender oder laufender Verbindung hat, springt das Modul zu diesem Tab, statt einen neuen zu öffnen. Ein getrennter Tab (○) wird durch den neuen ersetzt.' }
+        @{ T = 'i'; X = '**Auflösung:** folgt der Fenstergröße, auch beim Vergrößern des Fensters.' }
+        @{ T = 'i'; X = '**Zwischenablage:** wird umgeleitet, sonst nichts (keine Laufwerke, Drucker oder Smartcards).' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Voraussetzung:** Remotedesktop auf dem Ziel aktiv (TCP 3389) und das Konto darf sich per Remotedesktop anmelden. Das Steuerelement mstscax.dll ist Bestandteil von Windows.' }
+        @{ T = 'i'; X = '**Ohne Abfrage per GPO:** Computerkonfiguration > Administrative Vorlagen > System > Delegierung von Anmeldeinformationen > **Delegierung von Standardanmeldeinformationen zulassen**, TERMSRV/* eintragen, gpupdate /force und neu anmelden. Die Schritte stehen auch im Fenster unter **Hinweis zur Anmeldung**.' }
+        @{ T = 'i'; X = '**Kennwort:** geht nur im Arbeitsspeicher an das RDP-Steuerelement und wird nicht gespeichert.' }
+        @{ T = 'i'; X = '**Fenster schließen** trennt alle Verbindungen (mit Rückfrage, solange Verbindungen bestehen). Beendest du das NET-COCKPIT, kommt dieselbe Rückfrage und das RDP-Fenster schließt sich mit.' }
+        @{ T = 'i'; X = '**Log:** Start und Ende einer Verbindung stehen im Log des NET-COCKPIT.' }
+        @{ T = 'w'; X = 'Aus dem Testskript übernommen (Verbindung, Tabs, Zwischenablage, Auflösung getestet). Neu und noch nicht getestet: Abmelden, Aufruf über das Menü, Kennwortabfrage für das angemeldete Konto, Konto aus der Spalte, mehrere Tabs gleichzeitig.' }
+    ) }
+}
+
+# MouseMover
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['MOUSEMOVER'] = {
+    @{ Titel = 'MouseMover'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Bewegt alle **30 Sekunden** den Mauszeiger **1 Pixel nach rechts** und gleich wieder **1 Pixel nach links**, damit der Rechner nicht in den Leerlauf geht. Das Fenster öffnet sich über **Werkzeuge > MouseMover** und bleibt immer im Vordergrund.' }
+        @{ T = 'h'; X = 'Bedienung' }
+        @{ T = 'i'; X = '**Schiebeschalter:** **I** = an, **O** = aus. Beim Öffnen des Fensters ist der Mouse Mover aus.' }
+        @{ T = 'i'; X = '**Aktives Fenster:** das Fenster unter dem Mauszeiger (Titel und Programm), dorthin geht die Bewegung. Bei einem RDP-Tab des NET-COCKPIT steht zusätzlich der Server. Dazu der Countdown bis zur nächsten Bewegung.' }
+        @{ T = 'i'; X = '**Fenster schließen** oder das NET-COCKPIT beenden stoppt den Mouse Mover. Es wird nichts gespeichert.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Lokaler Rechner:** Der Mouse Mover hält den Rechner wach, auf dem das NET-COCKPIT läuft.' }
+        @{ T = 'i'; X = '**RDP-Sitzungen:** Die Bewegung kommt in einer Sitzung nur an, solange der Mauszeiger über dem RDP-Fenster steht. Dann zählt sie dort als Eingabe.' }
+        @{ T = 'i'; X = '**Richtlinien:** Eine per GPO erzwungene Sperre kann je nach Richtlinie trotzdem greifen.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: Schalter, Bewegung, Anzeige des Fensters unter dem Mauszeiger und Countdown auf einem echten Rechner.' }
+    ) }
+}
+
+# WOL
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['WOL'] = {
+    @{ Titel = 'WOL'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Prüft und richtet **Wake-on-LAN** auf den markierten Geräten ein und weckt Geräte auf. Das Fenster öffnet sich über **Module > WOL** und bleibt neben der Tabelle offen. Die Einrichtung braucht man pro Gerät nur einmal.' }
+        @{ T = 'h'; X = 'Voraussetzungen' }
+        @{ T = 'i'; X = '**Status, Tool und Aktivieren:** WinRM (TCP 5985), ein Konto mit Administratorrechten auf dem Zielgerät, Gerät grün.' }
+        @{ T = 'i'; X = '**Aufwecken:** nur die MAC-Adresse in der Tabelle, kein WinRM.' }
+        @{ T = 'h'; X = 'Knöpfe' }
+        @{ T = 'i'; X = '**Status prüfen:** Hersteller und Modell, Magic Packet der Netzwerkkarte, "Gerät darf den Computer aktivieren", Schnellstart und Wake-on-LAN im BIOS. Die Zeile zeigt am Ende, ob WoL bereit ist oder was fehlt.' }
+        @{ T = 'i'; X = '**Tool nachinstallieren (Dell):** installiert Dell Command | Configure (WinGet-Id Dell.CommandConfigure; danach läuft automatisch Status prüfen) auf Dell-Geräten, auf denen es fehlt. Das Gerät braucht PowerShell 7 und das WinGet-Modul (APP-Modul > WinGet-Modul nachinstallieren) und Internetzugang. HP und Lenovo brauchen kein Tool.' }
+        @{ T = 'i'; X = '**Schnellstart ausschalten:** schaltet nur den Schnellstart von Windows aus, bei jedem Hersteller (auch Gigabyte, Alienware und andere, bei denen das BIOS nicht unterstützt wird). Netzwerkkarte und BIOS bleiben unverändert.' }
+        @{ T = 'i'; X = '**WOL aktivieren:** schaltet bei der Netzwerkkarte (mit der Geräte-IP) Magic Packet und "Gerät darf den Computer aktivieren" ein, deaktiviert den Schnellstart (HiberbootEnabled = 0) und setzt Wake-on-LAN im BIOS, soweit möglich. Danach liest das Modul den Stand neu.' }
+        @{ T = 'i'; X = '**Aufwecken:** sendet ein Magic Packet an die MAC-Adresse der markierten Geräte (Broadcast des Subnetzes und 255.255.255.255, UDP 9 und 7). Bei IP-Bereichen und einzelnen IP-Adressen geht es nur an 255.255.255.255.' }
+        @{ T = 'h'; X = 'BIOS' }
+        @{ T = 'i'; X = '**Dell:** über cctk.exe von Dell Command | Configure (--wakeonlan). Das Modul probiert lanonly, lanwlan und enable und liest den Wert danach zurück.' }
+        @{ T = 'i'; X = '**HP:** über WMI (root\HP\InstrumentedBIOS, Einstellung "Wake On LAN").' }
+        @{ T = 'i'; X = '**Lenovo:** über WMI (root\wmi, Lenovo_BiosSetting, Einstellung "Wake On LAN") mit anschließendem Speichern.' }
+        @{ T = 'i'; X = '**Andere Hersteller:** werden nicht unterstützt, das BIOS bleibt unverändert.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Spalten:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus).' }
+        @{ T = 'i'; X = '**Netzwerkkarte:** Die Änderung läuft ohne Neustart der Karte. Greift sie nicht, hilft ein Neustart des Geräts.' }
+        @{ T = 'i'; X = '**BIOS-Kennwort:** Ist eines gesetzt, kann das BIOS nicht geändert werden, das Log nennt den Rückgabewert.' }
+        @{ T = 'i'; X = '**Nicht gesetzt oder nicht prüfbar:** Manche BIOS-Versionen haben zusätzliche Optionen für den ausgeschalteten Zustand (zum Beispiel Deep Sleep bei Dell). Diese ändert das Modul nicht.' }
+        @{ T = 'i'; X = '**Gespeicherte Werte:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten.' }
+        @{ T = 'w'; X = 'HP und Lenovo sind noch nicht an echten Geräten getestet. Das Modul ist insgesamt noch nicht vollständig auf echten Geräten getestet.' }
+    ) }
+}

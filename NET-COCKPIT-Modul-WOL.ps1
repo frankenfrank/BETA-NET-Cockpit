@@ -541,33 +541,3 @@ function script:Show-WolModulWOL {
     $f.Show()
     Set-WolModulOffen -Key 'WOL' -Offen $true
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['WOL'] = {
-    @{ Titel = 'WOL'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Prüft und richtet **Wake-on-LAN** auf den markierten Geräten ein und weckt Geräte auf. Das Fenster öffnet sich über **Module > WOL** und bleibt neben der Tabelle offen. Die Einrichtung braucht man pro Gerät nur einmal.' }
-        @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**Status, Tool und Aktivieren:** WinRM (TCP 5985), ein Konto mit Administratorrechten auf dem Zielgerät, Gerät grün.' }
-        @{ T = 'i'; X = '**Aufwecken:** nur die MAC-Adresse in der Tabelle, kein WinRM.' }
-        @{ T = 'h'; X = 'Knöpfe' }
-        @{ T = 'i'; X = '**Status prüfen:** Hersteller und Modell, Magic Packet der Netzwerkkarte, "Gerät darf den Computer aktivieren", Schnellstart und Wake-on-LAN im BIOS. Die Zeile zeigt am Ende, ob WoL bereit ist oder was fehlt.' }
-        @{ T = 'i'; X = '**Tool nachinstallieren (Dell):** installiert Dell Command | Configure (WinGet-Id Dell.CommandConfigure; danach läuft automatisch Status prüfen) auf Dell-Geräten, auf denen es fehlt. Das Gerät braucht PowerShell 7 und das WinGet-Modul (APP-Modul > WinGet-Modul nachinstallieren) und Internetzugang. HP und Lenovo brauchen kein Tool.' }
-        @{ T = 'i'; X = '**Schnellstart ausschalten:** schaltet nur den Schnellstart von Windows aus, bei jedem Hersteller (auch Gigabyte, Alienware und andere, bei denen das BIOS nicht unterstützt wird). Netzwerkkarte und BIOS bleiben unverändert.' }
-        @{ T = 'i'; X = '**WOL aktivieren:** schaltet bei der Netzwerkkarte (mit der Geräte-IP) Magic Packet und "Gerät darf den Computer aktivieren" ein, deaktiviert den Schnellstart (HiberbootEnabled = 0) und setzt Wake-on-LAN im BIOS, soweit möglich. Danach liest das Modul den Stand neu.' }
-        @{ T = 'i'; X = '**Aufwecken:** sendet ein Magic Packet an die MAC-Adresse der markierten Geräte (Broadcast des Subnetzes und 255.255.255.255, UDP 9 und 7). Bei IP-Bereichen und einzelnen IP-Adressen geht es nur an 255.255.255.255.' }
-        @{ T = 'h'; X = 'BIOS' }
-        @{ T = 'i'; X = '**Dell:** über cctk.exe von Dell Command | Configure (--wakeonlan). Das Modul probiert lanonly, lanwlan und enable und liest den Wert danach zurück.' }
-        @{ T = 'i'; X = '**HP:** über WMI (root\HP\InstrumentedBIOS, Einstellung "Wake On LAN").' }
-        @{ T = 'i'; X = '**Lenovo:** über WMI (root\wmi, Lenovo_BiosSetting, Einstellung "Wake On LAN") mit anschließendem Speichern.' }
-        @{ T = 'i'; X = '**Andere Hersteller:** werden nicht unterstützt, das BIOS bleibt unverändert.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus).' }
-        @{ T = 'i'; X = '**Netzwerkkarte:** Die Änderung läuft ohne Neustart der Karte. Greift sie nicht, hilft ein Neustart des Geräts.' }
-        @{ T = 'i'; X = '**BIOS-Kennwort:** Ist eines gesetzt, kann das BIOS nicht geändert werden, das Log nennt den Rückgabewert.' }
-        @{ T = 'i'; X = '**Nicht gesetzt oder nicht prüfbar:** Manche BIOS-Versionen haben zusätzliche Optionen für den ausgeschalteten Zustand (zum Beispiel Deep Sleep bei Dell). Diese ändert das Modul nicht.' }
-        @{ T = 'i'; X = '**Gespeicherte Werte:** Gerät, WoL Netzwerkkarte, Schnellstart und WoL im BIOS bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten.' }
-        @{ T = 'w'; X = 'HP und Lenovo sind noch nicht an echten Geräten getestet. Das Modul ist insgesamt noch nicht vollständig auf echten Geräten getestet.' }
-    ) }
-}

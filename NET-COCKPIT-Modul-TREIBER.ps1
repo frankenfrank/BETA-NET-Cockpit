@@ -1223,30 +1223,3 @@ function script:Show-WolModulTREIBER {
     $f.Show()
     Set-WolModulOffen -Key 'TREIBER' -Offen $true
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['TREIBER'] = {
-    @{ Titel = 'TREIBER-Updates'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Sucht und installiert **Treiber-Updates** für **Dell, HP und Lenovo** auf den markierten, grünen Geräten, ohne RDP. Der PC-Hersteller wird je Gerät erkannt und dessen Tool genutzt: Dell Command | Update, HP Image Assistant, Lenovo LSUClient. Andere Hersteller: "nicht unterstützt". Das Fenster öffnet sich über **Module > TREIBER** und bleibt neben der Tabelle offen.' }
-        @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**Auf jedem Zielgerät einmalig,** in PowerShell als Administrator: Enable-PSRemoting -Force. Bei Clients im Netzwerkprofil "Öffentlich" zusätzlich: Enable-PSRemoting -Force -SkipNetworkProfileCheck' }
-        @{ T = 'i'; X = '**Das Gerät braucht Internet** (Hersteller-Server, bei der Tool-Nachinstallation PSGallery bzw. WinGet).' }
-        @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten, Port 5985 erreichbar.' }
-        @{ T = 'h'; X = 'Knöpfe' }
-        @{ T = 'i'; X = '**Status prüfen:** PC-Hersteller, Modell, Windows-Version, Neustart, Akkubetrieb, Treiber-Tool und Treiber-Updates.' }
-        @{ T = 'i'; X = '**Treiber-Updates installieren:** mit Rückfrage, still, nie automatischer Neustart. Ist einer nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
-        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. Danach läuft automatisch Status prüfen für dieses Gerät.' }
-        @{ T = 'i'; X = '**BIOS/Firmware einbeziehen:** standardmäßig aus, bei Akkubetrieb Abbruch. Der Schalter gilt für Status prüfen und Installieren.' }
-        @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Treiber, Verlauf der Installationen, Tool-Log und das Log dieses Geräts.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Spalten:** Windows, Neustart ausstehend, Letzter Neustart, PC-Hersteller, Modell, Treiber-Tool und Treiber-Updates sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus; Ansicht > Spalten blendet sie bis zum nächsten Öffnen oder Schließen von Hand ein oder aus). Die Spalte "Hersteller" des Cockpits ist der Netzwerk-Hersteller aus der MAC-Adresse.' }
-        @{ T = 'i'; X = '**Dell:** gezählt werden nur Updates, die dcu-cli selbst meldet (inventarisiert). Nicht inventarisierte Katalog-Einträge stehen als "(+N)" in der Spalte und im Log.' }
-        @{ T = 'i'; X = '**Parallelbetrieb mit OS- und APP-Modul:** eigene Aufgaben und Logs; läuft ein anderes NET-COCKPIT-Tool auf dem Gerät, steht "Anderes NET-COCKPIT-Tool läuft". Der geplante Neustart gilt für alle gemeinsam.' }
-        @{ T = 'i'; X = '**Aufgaben auf dem Gerät** laufen als SYSTEM und werden nach dem Ende gelöscht. Verlauf und Tool-Log liegen im Ordner C:\ProgramData\NET-COCKPIT (ein vorhandener Ordner C:\ProgramData\WaToKi wird beim ersten Zugriff dorthin umbenannt).' }
-        @{ T = 'i'; X = '**Log je Gerät:** C:\Temp\NET-COCKPIT_data\Modul-TREIBER\yyyyMMdd_Gerät_treiber-log.txt' }
-        @{ T = 'i'; X = '**Gespeicherte Werte:** PC-Hersteller, Modell und Treiber-Tool bleiben je Gerät gespeichert (NET-COCKPIT-werte.json) und stehen nach dem Laden der Liste wieder in den Spalten. Treiber-Updates, Letzter Neustart und Neustart ausstehend werden nicht gespeichert.' }
-        @{ T = 'w'; X = 'Noch nicht an echten Geräten getestet (HP, Lenovo).' }
-    ) }
-}

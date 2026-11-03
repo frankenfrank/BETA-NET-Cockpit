@@ -22,6 +22,7 @@
     - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
     - Module im Menü Module (OS, APP, Treiber, Diagnose, M365-Wartungs-App, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Hilfetexte der Module: Datei NET-COCKPIT-Hilfe.ps1 neben dem Cockpit; die Info lädt sie beim Öffnen (bei Bedarf vom Server), damit alle Modul-Reiter ohne Start der Module lesbar sind
     - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
     - Modul M365-Wartungs-App: legt im Kunden-Tenant die Wartungs-App MAHR-EDV-Wartung für das M365-Cockpit an oder aktualisiert sie (App-Registrierung, Zertifikat, Berechtigungen); zeigt vorher, was installiert wird, wählt zusätzliche Berechtigungen per Haken und startet das eingebaute Skript in einem eigenen PowerShell-Fenster ohne Administratorrechte (kein Gerätebezug)
     - Modul WOL: Wake-on-LAN prüfen und einrichten (Netzwerkkarte, Schnellstart, BIOS bei Dell, HP, Lenovo), Tool nachinstallieren (Dell) und Geräte per Magic Packet aufwecken
@@ -35,7 +36,7 @@
     - Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen: WinRM (TCP 5985) und Administratorrechte auf dem Ziel (Windows)
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
-    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
+    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
     - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel) und legt zusätzlich die Datei net-cockpit-server.json neben das Cockpit; fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
@@ -141,6 +142,9 @@ $script:Module = [ordered]@{
     WOL     = @{ Name = 'WOL';             Datei = 'NET-COCKPIT-Modul-WOL.ps1';     Geladen = $false }
 }
 $script:ModulInfo = @{}
+## Hilfedatei mit den Reitern aller Module (wird beim Öffnen der Info geladen)
+$script:HilfeDatei = 'NET-COCKPIT-Hilfe.ps1'
+$script:HilfeGeladen = $false
 $script:ModulOffen = [System.Collections.Generic.HashSet[string]]::new()
 $script:ModulSpaltenAn = [System.Collections.Generic.HashSet[string]]::new()
 $script:PortNamen    = @{
@@ -1635,14 +1639,19 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Aufwecken (Modul WOL):** Wake-on-LAN im BIOS/UEFI und in der Netzwerkkarte aktiv, Gerät per Kabel, MAC der weckenden Netzwerkkarte.' }
         @{ T = 'i'; X = '**Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen:** WinRM (TCP 5985) und Administratorrechte auf dem Ziel, Windows-Geräte. **KuDo-Informationen bei Linux:** SSH (TCP 22), Posh-SSH und ein Benutzer mit Kennwort, kein Root nötig.' }
         @{ T = 'i'; X = '**OU wählen:** Rechner in der Domäne, kein RSAT nötig.' }
-        @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
+        @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, ebenso die Hilfedatei NET-COCKPIT-Hilfe.ps1 mit den Reitern der Module (die Info lädt sie beim Öffnen, die Module müssen dafür nicht gestartet sein), die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
         @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
         @{ T = 'h'; X = 'Log' }
         @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
     ) })
 
-    foreach ($schluessel in @($script:ModulInfo.Keys)) {
+    foreach ($schluessel in @($script:Module.Keys | Where-Object { $script:ModulInfo.ContainsKey($_) })) {
         $inhalt.Add((& $script:ModulInfo[$schluessel]))
+    }
+    if (-not $script:HilfeGeladen) {
+        $inhalt.Add(@{ Titel = 'Module'; Bloecke = @(
+            @{ T = 'w'; X = "Die Hilfe der Module konnte nicht geladen werden. Erwartet wird die Datei $($script:HilfeDatei) im selben Ordner wie das NET-COCKPIT oder, beim Start über start.ps1, der Zugriff auf den Server." }
+        ) })
     }
     return $inhalt
 }
@@ -1715,6 +1724,7 @@ function New-WolInfoDokument {
 
 ### Info-Fenster
 function Show-WolInfo {
+    Import-WolHilfe
     $d = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -4415,6 +4425,22 @@ function Install-WolNachladen {
     }
     Write-WolLog "Vom Server geladen: $(@($script:NlErgebnis.Dateien).Count) Datei(en) für '$Titel'"
     return $true
+}
+
+## Hilfedatei laden (einmal): liegt sie nicht im Ordner des NET-COCKPIT und kennt das Cockpit den Server (Start über start.ps1), holt es sie vorher mit Ladefenster
+function Import-WolHilfe {
+    if ($script:HilfeGeladen -or -not $script:ModulOrdner) { return }
+    $pfad = Join-Path $script:ModulOrdner $script:HilfeDatei
+    if (-not (Test-Path -LiteralPath $pfad) -and $script:ServerBasis -and $script:ServerSchluessel) {
+        [void](Install-WolNachladen -Titel 'Hilfe wird geladen' -Pfade @($script:HilfeDatei) -ZielOrdner $script:ModulOrdner)
+    }
+    if (-not (Test-Path -LiteralPath $pfad)) { Write-WolLog "Hilfe: Datei $($script:HilfeDatei) nicht gefunden"; return }
+    try {
+        . $pfad
+        $script:HilfeGeladen = $true
+        Write-WolLog "Hilfe geladen: $($script:HilfeDatei)"
+    }
+    catch { Write-WolLog "Hilfe konnte nicht geladen werden: $($_.Exception.Message)" }
 }
 
 ## Modul beim ersten Aufruf nachladen (Dot-Sourcing); das Modul legt seine Funktionen mit "function script:Name" an, trägt eigene Spalten über New-WolSpalte ein und stellt Show-WolModul<Schlüssel> bereit; fehlt die Datei und kennt das Cockpit den Server (Start über start.ps1), holt es sie vorher mit Ladefenster

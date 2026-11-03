@@ -358,24 +358,3 @@ function script:Show-WolModulWATOKI {
     Update-WolWtListe
     $f.Show()
 }
-
-# Info
-## Reiter für die Info des NET-COCKPIT (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['WATOKI'] = {
-    @{ Titel = 'WaToKi'; Bloecke = @(
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Startet die **Wartungsskripte** aus dem Unterordner **WaToKi** neben dem NET-COCKPIT. Das Fenster öffnet sich über **Module > WaToKi** und bleibt neben der Tabelle offen. Rechts steht die Beschreibung aus dem Kopf des gewählten Skripts.' }
-        @{ T = 'h'; X = 'Ablauf' }
-        @{ T = 'i'; X = '**Skript wählen, Starten** (oder Doppelklick): Das Skript läuft in einem eigenen PowerShell-7-Fenster. Es läuft immer nur ein Skript gleichzeitig, **Starten** ist bis zum Ende gesperrt.' }
-        @{ T = 'i'; X = '**Parameter:** Das Modul liest den param-Block des Skripts (ohne es auszuführen) und übergibt nur, was das Skript kennt. **-Ziel** bekommt die markierten Geräte der Tabelle (Hostname, sonst IP), **-Ausgabeordner** den Ordner Modul-WaToKi im Datenordner, **-Anmeldedaten** das Konto der markierten Geräte (ein Konto für alle), **-AnmeldedatenJeZiel** das Konto jedes markierten Geräts einzeln.' }
-        @{ T = 'i'; X = '**Ohne diese Parameter** startet das Skript unverändert und fragt wie bisher selbst nach Gerät und Ablageort.' }
-        @{ T = 'i'; X = '**Ausgabeordner öffnen:** öffnet C:\Temp\NET-COCKPIT_data\Modul-WaToKi im Explorer.' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Konto:** Kennt ein Skript den Parameter **-Anmeldedaten**, bekommt es das Konto aus der Spalte "Konto" (Optionen > Konto für markierte Geräte). Das Modul fragt keine Kennwörter ab: Fehlt bei einem Gerät mit Konto das Kennwort (zum Beispiel nach einem Neustart), meldet das Modul die Geräte, nichts startet. Dann das Kennwort im Cockpit pro Gerät setzen und erneut starten. Ohne Eintrag in der Spalte läuft das Skript mit dem angemeldeten Windows-Konto oder fragt selbst. Skripte mit **-AnmeldedatenJeZiel** bekommen für jedes Gerät sein eigenes Konto, Skripte mit nur **-Anmeldedaten** nehmen ein Konto für alle, dort startet bei unterschiedlichen Konten nichts.' }
-        @{ T = 'i'; X = '**Übergabe des Kontos:** über eine verschlüsselte Temp-Datei, die nur dein Windows-Konto auf diesem Rechner lesen kann. Der Startbefehl liest sie ein und löscht sie sofort, nach dem Skriptende löscht das Modul sie noch einmal.' }
-        @{ T = 'i'; X = '**Param-Block:** Er muss im Skript ganz oben stehen, vor Clear-Host. Sonst erkennt das Modul die Parameter nicht.' }
-        @{ T = 'i'; X = '**Spalte Wartungsreihenfolge:** erscheint, wenn im WaToKi-Fenster der Haken **Spalte Wartungsreihenfolge in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und lässt sich direkt in der Tabelle eintippen (Doppelklick in die Zelle). Der Wert wird mit der Geräteliste gespeichert, die Spalte lässt sich filtern und sortieren (als Text, also 10 vor 2).' }
-        @{ T = 'i'; X = '**Log:** Start und Ende eines Skripts stehen im Log des NET-COCKPIT.' }
-        @{ T = 'w'; X = 'Noch nicht getestet: Fenster, Starten, Sperre und Parameterübergabe auf einem echten Rechner.' }
-    ) }
-}
