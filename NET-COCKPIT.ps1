@@ -22,6 +22,7 @@
     - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
     - Module im Menü Module (OS, APP, Treiber, Diagnose, M365-Wartungs-App, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Info: Reiter Voraussetzungen mit Allgemein sowie je einer Anleitung zur Grundfreischaltung (WinRM und Ping) per GPO und per Intune
     - Hilfetexte der Module: Datei NET-COCKPIT-Hilfe.ps1 neben dem Cockpit; die Info lädt sie beim Öffnen (bei Bedarf vom Server), damit alle Modul-Reiter ohne Start der Module lesbar sind
     - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
     - Modul M365-Wartungs-App: legt im Kunden-Tenant die Wartungs-App MAHR-EDV-Wartung für das M365-Cockpit an oder aktualisiert sie (App-Registrierung, Zertifikat, Berechtigungen); zeigt vorher, was installiert wird, wählt zusätzliche Berechtigungen per Haken und startet das eingebaute Skript in einem eigenen PowerShell-Fenster ohne Administratorrechte (kein Gerätebezug)
@@ -1655,17 +1656,74 @@ function Get-WolInfoInhalt {
         @{ T = 'w'; X = 'Für die TrustedHosts braucht das Cockpit Administratorrechte (PowerShell 7 als Administrator starten). TrustedHosts schaltet die Prüfung der Gegenstelle für diese Geräte ab.' }
     ) })
 
-    $inhalt.Add(@{ Titel = 'Voraussetzungen'; Bloecke = @(
+    ### Reiter Voraussetzungen: Allgemein, Freischaltung per GPO (Domäne) und per Intune (ohne Domäne)
+    $inhalt.Add(@{ Titel = 'Voraussetzungen'; Unter = @(
+        @{ Titel = 'Allgemein'; Bloecke = @(
         @{ T = 'h'; X = 'Voraussetzungen' }
-        @{ T = 'i'; X = '**PowerShell 7** unter Windows.' }
-        @{ T = 'i'; X = '**MAC-Adressen** werden nur im eigenen Subnetz gefunden (ARP). Geräte in fremden Netzen werden über die IP-Adresse erkannt.' }
-        @{ T = 'i'; X = '**Aufwecken (Modul WOL):** Wake-on-LAN im BIOS/UEFI und in der Netzwerkkarte aktiv, Gerät per Kabel, MAC der weckenden Netzwerkkarte.' }
-        @{ T = 'i'; X = '**Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen:** WinRM (TCP 5985) und Administratorrechte auf dem Ziel, Windows-Geräte. **KuDo-Informationen bei Linux:** SSH (TCP 22), Posh-SSH und ein Benutzer mit Kennwort, kein Root nötig.' }
-        @{ T = 'i'; X = '**OU wählen:** Rechner in der Domäne, kein RSAT nötig.' }
-        @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, ebenso die Hilfedatei NET-COCKPIT-Hilfe.ps1 mit den Reitern der Module (die Info lädt sie beim Öffnen, die Module müssen dafür nicht gestartet sein), die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
-        @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
-        @{ T = 'h'; X = 'Log' }
-        @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
+    @{ T = 'i'; X = '**PowerShell 7** unter Windows.' }
+    @{ T = 'i'; X = '**MAC-Adressen** werden nur im eigenen Subnetz gefunden (ARP). Geräte in fremden Netzen werden über die IP-Adresse erkannt.' }
+    @{ T = 'i'; X = '**Aufwecken (Modul WOL):** Wake-on-LAN im BIOS/UEFI und in der Netzwerkkarte aktiv, Gerät per Kabel, MAC der weckenden Netzwerkkarte.' }
+    @{ T = 'i'; X = '**Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen:** WinRM (TCP 5985) und Administratorrechte auf dem Ziel, Windows-Geräte. **KuDo-Informationen bei Linux:** SSH (TCP 22), Posh-SSH und ein Benutzer mit Kennwort, kein Root nötig.' }
+    @{ T = 'i'; X = '**OU wählen:** Rechner in der Domäne, kein RSAT nötig.' }
+    @{ T = 'i'; X = '**Module** (Menü Module): die Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1, NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 liegen im selben Ordner wie das NET-COCKPIT, ebenso die Hilfedatei NET-COCKPIT-Hilfe.ps1 mit den Reitern der Module (die Info lädt sie beim Öffnen, die Module müssen dafür nicht gestartet sein), die Skripte des Moduls WaToKi im Unterordner WaToKi. Startest du das Cockpit über start.ps1, liegt anfangs nur das NET-COCKPIT bereit: **Beim ersten Aufruf eines Moduls** (bei WaToKi auch der Skripte) erscheint ein Ladefenster **Modul ... wird gestartet** mit Fortschrittsbalken, das Cockpit holt die Datei vom Server und prüft sie gegen ihre Signatur. Ohne gültige Signatur wird nichts geladen.' }
+    @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
+    @{ T = 'h'; X = 'Log' }
+    @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
+        ) }
+        @{ Titel = 'Freischaltung per GPO (Domäne)'; Bloecke = @(
+            @{ T = 'h'; X = 'Wofür?' }
+            @{ T = 'p'; X = 'Grundfreischaltung der Geräte in einer Domäne für das NET-COCKPIT: WinRM (TCP 5985) und Ping, nur vom Admin-PC aus und nur im Firmennetz. Alles Weitere (zum Beispiel RDP) lässt sich danach über das Cockpit aktivieren. Die Anleitung gilt für die GPO **cp - Enable PSRemoting**.' }
+            @{ T = 'h'; X = 'Variablen' }
+            @{ T = 'i'; X = '**ADMIN-IP:** IP-Adresse des Admin-PCs oder Admin-Servers, von dem aus verwaltet wird (mehrere durch Komma getrennt).' }
+            @{ T = 'i'; X = '**CLIENT-NETZ:** Netzbereich der Clients, zum Beispiel im Format 192.168.1.0/24 (mehrere Netze durch Komma getrennt).' }
+            @{ T = 'h'; X = '1. WinRM aktivieren' }
+            @{ T = 'i'; X = 'Computerkonfiguration > Richtlinien > Administrative Vorlagen > Windows-Komponenten > Windows-Remoteverwaltung (WinRM) > WinRM-Dienst.' }
+            @{ T = 'i'; X = '**Remoteserververwaltung über WinRM zulassen:** Aktiviert, IPv4-Filter * (Sternchen).' }
+            @{ T = 'h'; X = '2. Dienst WinRM automatisch starten' }
+            @{ T = 'i'; X = 'Computerkonfiguration > Einstellungen > Systemsteuerungseinstellungen > Dienste > Neu > Dienst.' }
+            @{ T = 'i'; X = 'Dienstname **WinRM**, Starttyp **Automatisch**, Dienstaktion **Dienst starten**.' }
+            @{ T = 'h'; X = '3. Firewall: Regel WinRM' }
+            @{ T = 'i'; X = 'Computerkonfiguration > Richtlinien > Windows-Einstellungen > Sicherheitseinstellungen > Windows Defender Firewall mit erweiterter Sicherheit > Eingehende Regeln > Neue Regel > Benutzerdefiniert.' }
+            @{ T = 'i'; X = 'Alle Programme, Protokoll TCP, lokaler Port **5985**.' }
+            @{ T = 'i'; X = 'Bereich: Lokale IP-Adressen = **CLIENT-NETZ**, Remote-IP-Adressen = **ADMIN-IP**.' }
+            @{ T = 'i'; X = 'Verbindung zulassen, Profil: nur Domäne. Name: **WinRM (TCP 5985) eingehend - nur Admin-PC**.' }
+            @{ T = 'h'; X = '4. Firewall: Regel Ping' }
+            @{ T = 'i'; X = 'Neue Regel > Benutzerdefiniert > Alle Programme.' }
+            @{ T = 'i'; X = 'Protokolltyp **ICMPv4**, ICMP-Einstellungen anpassen: nur **Echoanforderung**.' }
+            @{ T = 'i'; X = 'Bereich: Lokale IP-Adressen = **CLIENT-NETZ**, Remote-IP-Adressen = **ADMIN-IP**.' }
+            @{ T = 'i'; X = 'Verbindung zulassen, Profil: nur Domäne. Name: **Ping (ICMPv4 Echo) eingehend - nur Admin-PC**.' }
+            @{ T = 'h'; X = '5. Verknüpfen und prüfen' }
+            @{ T = 'i'; X = 'GPO mit der Test-OU verknüpfen, auf dem Gerät **gpupdate /force**.' }
+            @{ T = 'i'; X = 'Vom Admin-PC: **Test-WSMan -ComputerName** mit dem FQDN des Geräts, dazu ein Ping. Danach im Cockpit die Statusprüfung: Grün heißt Ping und WinRM erreichbar.' }
+        ) }
+        @{ Titel = 'Freischaltung per Intune (ohne Domäne)'; Bloecke = @(
+            @{ T = 'h'; X = 'Wofür?' }
+            @{ T = 'p'; X = 'Grundfreischaltung für Geräte ohne Domäne (zum Beispiel Entra-joined mit Intune): WinRM (TCP 5985) und Ping, nur vom Admin-PC aus und nur im Firmennetz. Das Netzwerkprofil des Geräts (Öffentlich, Privat) spielt keine Rolle, weil die Firewallregeln für alle Netzwerktypen gelten. Für Domänengeräte gilt die Anleitung im Reiter GPO.' }
+            @{ T = 'h'; X = 'Variablen' }
+            @{ T = 'i'; X = '**ADMIN-IP:** IP-Adresse des Admin-PCs oder Admin-Servers, von dem aus verwaltet wird (mehrere durch Komma getrennt).' }
+            @{ T = 'i'; X = '**CLIENT-NETZ:** Netzbereich der Clients, zum Beispiel im Format 192.168.1.0/24 (mehrere Netze durch Komma getrennt).' }
+            @{ T = 'h'; X = '1. WinRM aktivieren (Einstellungskatalog)' }
+            @{ T = 'i'; X = 'Intune > Geräte > Konfiguration > Erstellen > Windows 10 und höher > Einstellungskatalog, Name zum Beispiel **cp - Enable PSRemoting**.' }
+            @{ T = 'i'; X = 'Administrative Vorlagen > Windows-Komponenten > Windows-Remoteverwaltung (WinRM) > WinRM-Dienst > **Remoteserververwaltung über WinRM zulassen** = Aktiviert, IPv4-Filter * (Sternchen).' }
+            @{ T = 'w'; X = 'Der IPv4-Filter legt fest, auf welchen Adressen der WinRM-Dienst lauscht; leer heißt: keine Adresse, also kein Listener. Die Einschränkung auf den Admin-PC und das Firmennetz erledigen die Firewallregeln (Punkt 3).' }
+            @{ T = 'h'; X = '2. Dienst WinRM automatisch starten (Plattformskript)' }
+            @{ T = 'p'; X = 'Ein Windows-Client liefert den Dienst WinRM gestoppt und mit Starttyp Manuell aus (auf einem geprüften Windows-11-Client war es so). Dafür gibt es ein Plattformskript.' }
+            @{ T = 'i'; X = 'Intune > Geräte > Skripte und Korrekturen > Plattformskripte > Hinzufügen > Windows 10 und höher, Name zum Beispiel **cp - WinRM Dienst automatisch**.' }
+            @{ T = 'i'; X = 'Inhalt: **Set-Service -Name WinRM -StartupType Automatic** und **Start-Service -Name WinRM**.' }
+            @{ T = 'i'; X = 'Skript im Benutzerkontext ausführen: **Nein**. Skript mit 64-Bit-PowerShell-Host ausführen: **Ja**. Plattformskripte laufen pro Gerät einmal, bei einer Änderung am Skript erneut.' }
+            @{ T = 'h'; X = '3. Firewall (Endpoint Security)' }
+            @{ T = 'i'; X = 'Intune > Endpoint Security > Firewall > Richtlinie erstellen > Windows > Microsoft Defender-Firewallregeln, Name zum Beispiel **cp - WinRM und Ping**, zwei Regeln.' }
+            @{ T = 'i'; X = '**WinRM (TCP 5985) eingehend - nur Admin-PC:** Richtung Eingehend, Aktion Zulassen, Protokoll TCP (6), lokaler Port **5985**, lokale Adressen **CLIENT-NETZ**, Remote-Adressen **ADMIN-IP**, Netzwerktypen alle.' }
+            @{ T = 'i'; X = '**Ping (ICMPv4 Echo) eingehend - nur Admin-PC:** Richtung Eingehend, Aktion Zulassen, Protokoll **1** (ICMPv4), ICMP-Typen und -Codes 8:*, lokale Adressen **CLIENT-NETZ**, Remote-Adressen **ADMIN-IP**, Netzwerktypen alle.' }
+            @{ T = 'i'; X = 'Ist ein Gerät in einem anderen Netz (zum Beispiel zu Hause), passen die lokalen Adressen nicht und es ist von außen nicht erreichbar.' }
+            @{ T = 'h'; X = '4. Zuweisen und prüfen' }
+            @{ T = 'i'; X = 'Alle drei zuerst an eine Testgruppe zuweisen. Auf dem Gerät synchronisieren: Einstellungen > Konten > Auf Arbeits- oder Schulkonto zugreifen > Info > Synchronisieren (die Plattformskripte können etwas länger brauchen).' }
+            @{ T = 'i'; X = 'Vom Admin-PC: **Test-NetConnection -ComputerName** mit der IP des Geräts (Ping) und mit **-Port 5985** (TcpTestSucceeded muss True sein).' }
+            @{ T = 'h'; X = 'Anmeldung ohne Domäne' }
+            @{ T = 'i'; X = 'Im Cockpit unter **Optionen > Konto für markierte Geräte** das lokale Konto als **.\Benutzername** eintragen.' }
+            @{ T = 'i'; X = 'Der Admin-PC braucht die Geräte in den TrustedHosts: **Optionen > Verbindung** (das Cockpit muss dafür als Administrator laufen).' }
+            @{ T = 'i'; X = 'Bei lokalen Konten außer dem eingebauten Administrator filtert Windows das Admin-Token beim Remotezugriff, solange **LocalAccountTokenFilterPolicy** nicht gesetzt ist.' }
+        ) }
     ) })
 
     ### Reiter Module: eine Auswahlleiste, darunter die Hilfe des gewählten Moduls (Reihenfolge wie im Menü Module)
