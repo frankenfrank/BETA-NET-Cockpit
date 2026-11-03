@@ -6,6 +6,8 @@
 .DESCRIPTION
     Wird vom NET-COCKPIT beim ersten Aufruf nachgeladen (liegt im selben Ordner) und wirkt auf die markierten, grünen Geräte der Tabelle.
     - Status prüfen: Windows-Version, letzter Neustart, Neustart ausstehend, geplanter Neustart, Modul PSWindowsUpdate, verfügbare Windows-Updates, Update-Verlauf
+    - Status prüfen sucht zusätzlich optionale Updates (zum Beispiel Feature-Updates, Art: Optional)
+    - Feature-Update installieren (Windows-Update-Agent, ohne Neustart)
     - Updates installieren (ohne Neustart) oder Updates installieren und bei Bedarf neu starten (nach 30 Sekunden)
     - Update-Modul (PSWindowsUpdate) nachinstallieren; danach läuft automatisch Status prüfen
     - Details je Gerät: verfügbare Updates, Update-Verlauf und Log
@@ -74,10 +76,27 @@ try {
                     KB      = if ($kbPasst) { [string]$kb[$i] } else { '' }
                     Titel   = [string]$titel[$i]
                     Groesse = if ($i -lt $groesse.Count) { [string]$groesse[$i] } else { '' }
+                    Art     = ''
                 })
             }
         }
     }
+
+    ### Optionale Installationen (zum Beispiel Feature-Updates), die Get-WindowsUpdate nicht liefert
+    $optionalFehler = ''
+    try {
+        $optional = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and DeploymentAction='OptionalInstallation'")
+        foreach ($u in $optional.Updates) {
+            $titel = [string]$u.Title
+            if (@($liste | Where-Object { $_.Titel -eq $titel }).Count -gt 0) { continue }
+            $kbText = ''
+            if ($u.KBArticleIDs.Count -gt 0) { $kbText = 'KB' + [string]$u.KBArticleIDs.Item(0) }
+            $mb = ''
+            if ($u.MaxDownloadSize -gt 0) { $mb = ('{0} MB' -f [math]::Round($u.MaxDownloadSize / 1MB)) }
+            $liste.Add([pscustomobject]@{ KB = $kbText; Titel = $titel; Groesse = $mb; Art = 'Optional' })
+        }
+    }
+    catch { $optionalFehler = ($_ | Out-String).Trim() }
 
     ### Update-Verlauf aus der Windows-Update-Historie
     $verlauf       = New-Object System.Collections.Generic.List[object]
@@ -119,18 +138,58 @@ try {
         Verlauf       = @($verlauf.ToArray())
         Letzte        = $letzte
         VerlaufFehler = $verlaufFehler
+        OptionalFehler = $optionalFehler
     }
 }
 catch {
-    $erg = [pscustomobject]@{ Fehler = ($_ | Out-String).Trim(); Updates = @(); Verlauf = @(); Letzte = ''; VerlaufFehler = '' }
+    $erg = [pscustomobject]@{ Fehler = ($_ | Out-String).Trim(); Updates = @(); Verlauf = @(); Letzte = ''; VerlaufFehler = ''; OptionalFehler = '' }
 }
 $erg | ConvertTo-Json -Depth 4 | Set-Content -Path $out -Encoding UTF8
+'@
+
+## Feature-Update installieren (direkt über den Windows-Update-Agent, optionale Installation), ohne Neustart
+$script:OsInstallSkriptFeature = @'
+$log = 'C:\Windows\Temp\NetCockpitOsInstall.log'
+try {
+    $sitzung  = New-Object -ComObject Microsoft.Update.Session
+    $suche    = $sitzung.CreateUpdateSearcher().Search("IsInstalled=0 and DeploymentAction='OptionalInstallation'")
+    $sammlung = New-Object -ComObject Microsoft.Update.UpdateColl
+    foreach ($u in $suche.Updates) {
+        if ($u.Title -like 'Windows 1*, version*') {
+            if (-not $u.EulaAccepted) { $u.AcceptEula() }
+            [void]$sammlung.Add($u)
+            Add-Content -Path $log -Value ('Gefunden: ' + $u.Title)
+        }
+    }
+    if ($sammlung.Count -eq 0) {
+        Add-Content -Path $log -Value 'Kein Feature-Update gefunden'
+        exit 2
+    }
+    Add-Content -Path $log -Value 'Lade das Feature-Update herunter'
+    $laden = $sitzung.CreateUpdateDownloader()
+    $laden.Updates = $sammlung
+    $ergebnis = $laden.Download()
+    Add-Content -Path $log -Value ('Download-Ergebnis: ' + $ergebnis.ResultCode)
+    if ($ergebnis.ResultCode -ne 2) { exit 1 }
+    Add-Content -Path $log -Value 'Installiere das Feature-Update'
+    $installer = $sitzung.CreateUpdateInstaller()
+    $installer.Updates = $sammlung
+    $installer.AllowSourcePrompts = $false
+    $ergebnis = $installer.Install()
+    Add-Content -Path $log -Value ('Installations-Ergebnis: ' + $ergebnis.ResultCode + ', Neustart erforderlich: ' + $ergebnis.RebootRequired)
+    if ($ergebnis.ResultCode -notin 2, 3) { exit 1 }
+}
+catch {
+    ($_ | Out-String) | Add-Content -Path $log
+    exit 1
+}
 '@
 
 ## Alle Skripte für den Job
 $script:OsSkripte = @{
     Install         = $script:OsInstallSkript
     InstallNeustart = $script:OsInstallSkriptNeustart
+    InstallFeature  = $script:OsInstallSkriptFeature
     Suche           = $script:OsSuchSkript
 }
 
@@ -271,10 +330,13 @@ $script:OsBlock = {
                 if (-not $res) { return }
 
                 ### Verfügbare Updates
-                $liste = @($res.Updates | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ KB = [string]$_.KB; Titel = [string]$_.Titel; Groesse = [string]$_.Groesse } })
+                $liste = @($res.Updates | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ KB = [string]$_.KB; Titel = [string]$_.Titel; Groesse = [string]$_.Groesse; Art = [string]$_.Art } })
                 $S.Details = $liste
                 $S.Updates = [string]$liste.Count
-                foreach ($u in $liste) { Write-Log ("{0} | {1} | {2}" -f $u.KB, $u.Titel, $u.Groesse) }
+                foreach ($u in $liste) { Write-Log ("{0} | {1} | {2} | {3}" -f $u.KB, $u.Titel, $u.Groesse, $u.Art) }
+                if ($res.OptionalFehler) { Write-Log "Suche nach optionalen Updates nicht möglich: $($res.OptionalFehler)" }
+                $anzahlOptional = @($liste | Where-Object { $_.Art -eq 'Optional' }).Count
+                if ($anzahlOptional -gt 0) { $zusatz = " (davon $anzahlOptional optional)$zusatz" }
 
                 ### Update-Verlauf
                 $S.Verlauf = @(@($res.Verlauf) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Datum = [string]$_.Datum; KB = [string]$_.KB; Titel = [string]$_.Titel; Ergebnis = [string]$_.Ergebnis } })
@@ -307,11 +369,11 @@ $script:OsBlock = {
             }
 
             ## Updates installieren (lokale Aufgabe auf dem Gerät), optional mit Neustart
-            { $_ -in 'Installieren', 'InstallierenNeustart' } {
-                if (-not (Test-Modul)) { $S.Status = 'Modul fehlt'; Write-Log 'PSWindowsUpdate fehlt'; return }
+            { $_ -in 'Installieren', 'InstallierenNeustart', 'InstallierenFeature' } {
+                if ($Aktion -ne 'InstallierenFeature' -and -not (Test-Modul)) { $S.Status = 'Modul fehlt'; Write-Log 'PSWindowsUpdate fehlt'; return }
 
                 $mitNeustart = ($Aktion -eq 'InstallierenNeustart')
-                $skript = if ($mitNeustart) { $Skripte.InstallNeustart } else { $Skripte.Install }
+                $skript = if ($Aktion -eq 'InstallierenFeature') { $Skripte.InstallFeature } elseif ($mitNeustart) { $Skripte.InstallNeustart } else { $Skripte.Install }
                 $fremd = @(Get-WolZielAnderesTool -Ic $ic -Eigene 'NetCockpitOs*')
                 if ($fremd.Count -gt 0) {
                     $S.Status = 'Anderes NET-COCKPIT-Tool läuft auf dem Gerät'
@@ -332,7 +394,8 @@ $script:OsBlock = {
                         $S.Status = 'Bereite Installation vor...'
                         $null = Remove-WolZielTask -Ic $ic -Name $name
                         $null = Start-WolZielTask -Ic $ic -Name $name -Skript $skript
-                        if ($mitNeustart) { Write-Log 'Installation gestartet (-AcceptAll -IgnoreReboot), danach Neustart nach 30 Sekunden, falls nötig' }
+                        if ($Aktion -eq 'InstallierenFeature') { Write-Log 'Installation des Feature-Updates gestartet (Windows-Update-Agent, kein automatischer Neustart)' }
+                        elseif ($mitNeustart) { Write-Log 'Installation gestartet (-AcceptAll -IgnoreReboot), danach Neustart nach 30 Sekunden, falls nötig' }
                         else { Write-Log 'Installation gestartet (-AcceptAll -IgnoreReboot)' }
                         Start-Sleep -Seconds 5
                     }
@@ -525,6 +588,7 @@ function script:Show-WolOsDetails {
           <DataGrid.Columns>
             <DataGridTextColumn Header="KB"    Binding="{Binding KB, Mode=OneWay}"      Width="110"/>
             <DataGridTextColumn Header="Titel" Binding="{Binding Titel, Mode=OneWay}"   Width="*"/>
+            <DataGridTextColumn Header="Art"   Binding="{Binding Art, Mode=OneWay}"     Width="80"/>
             <DataGridTextColumn Header="Größe" Binding="{Binding Groesse, Mode=OneWay}" Width="90"/>
           </DataGrid.Columns>
         </DataGrid>
@@ -583,6 +647,16 @@ function script:Start-WolOsInstallierenNeustart {
     }
 }
 
+## Feature-Update installieren (Rückfrage, kein automatischer Neustart)
+function script:Start-WolOsFeature {
+    $ziele = Get-WolOsZiele
+    if (-not $ziele) { return }
+    $frage = "Das Feature-Update (zum Beispiel Windows 11, Version 26H2) auf diesen Geräten herunterladen und installieren?`r`n`r`n$((Get-WolOsNamen -Zeilen $ziele) -replace ', ', "`r`n")`r`n`r`nEs gibt keinen automatischen Neustart. Das Update muss vorher über Status prüfen gefunden worden sein (Art: Optional)."
+    if ([System.Windows.MessageBox]::Show($frage, 'Feature-Update installieren', 'YesNo', 'Warning') -eq 'Yes') {
+        Start-WolOsAktion -Aktion 'InstallierenFeature' -Ziele $ziele
+    }
+}
+
 ## Update-Modul nachinstallieren (Geräte, bei denen es schon da ist, werden übersprungen)
 function script:Start-WolOsModul {
     $ziele = Get-WolOsZiele
@@ -624,9 +698,11 @@ function script:Show-WolModulOS {
     <Button x:Name="BtnStatus" Content="Status prüfen" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Prüft Windows-Version, letzten Neustart, ausstehenden und geplanten Neustart und das Modul PSWindowsUpdate, sucht Updates und liest den Update-Verlauf"/>
     <Button x:Name="BtnInstall" Content="Updates installieren" Padding="10,5" Margin="0,0,0,6"
-            ToolTip="Installiert alle gefundenen Updates mit -AcceptAll -IgnoreReboot (kein automatischer Neustart)"/>
+            ToolTip="Installiert alle normal gefundenen Updates mit -AcceptAll -IgnoreReboot (kein automatischer Neustart), optionale Feature-Updates nicht"/>
     <Button x:Name="BtnInstallNeu" Content="Updates installieren und bei Bedarf neu starten" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Wie Updates installieren, danach Neustart nach 30 Sekunden, aber nur wenn ein Neustart nötig ist"/>
+    <Button x:Name="BtnFeature" Content="Feature-Update installieren" Padding="10,5" Margin="0,0,0,6"
+            ToolTip="Lädt ein gefundenes optionales Feature-Update (zum Beispiel Windows 11, Version 26H2) herunter und installiert es, ohne automatischen Neustart"/>
     <Button x:Name="BtnModul" Content="Update-Modul nachinstallieren" Padding="10,5" Margin="0,0,0,6"
             ToolTip="Installiert das PowerShell-Modul PSWindowsUpdate auf markierten Geräten, auf denen es fehlt"/>
     <Button x:Name="BtnDetails" Content="Details des markierten Geräts..." Padding="10,5" Margin="0,0,0,6"
@@ -640,6 +716,7 @@ function script:Show-WolModulOS {
     $f.FindName('BtnStatus').Add_Click({ Start-WolOsStatus })
     $f.FindName('BtnInstall').Add_Click({ Start-WolOsInstallieren })
     $f.FindName('BtnInstallNeu').Add_Click({ Start-WolOsInstallierenNeustart })
+    $f.FindName('BtnFeature').Add_Click({ Start-WolOsFeature })
     $f.FindName('BtnModul').Add_Click({ Start-WolOsModul })
     $f.FindName('BtnDetails').Add_Click({ Start-WolOsDetails })
     $f.FindName('BtnSchliessen').Add_Click({ $script:OsFenster.Close() })

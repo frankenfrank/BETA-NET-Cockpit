@@ -503,20 +503,30 @@ try {
             if (-not (Get-DcuPfad)) { Write-Zeile 'dcu-cli.exe ist nach der Installation nicht vorhanden'; exit 1 }
         }
 
-        ### HP: PowerShellGet aktualisieren, HPCMSL aus der PSGallery installieren, danach HP Image Assistant entpacken
+        ### HP: HPCMSL aus der PSGallery installieren (bei altem PowerShellGet mit einer vorübergehend geladenen neueren Version), danach HP Image Assistant entpacken
         'HP' {
             $null = Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-            ## Ältere PowerShellGet-Versionen (Windows PowerShell 5.1 liefert 1.0.0.1) können die HP-Module nicht installieren (PowerShellGetFormatVersion 2.0) und überspringen sie ohne Fehler
+            ## Ältere PowerShellGet-Versionen (Windows PowerShell 5.1 liefert 1.0.0.1) können die HP-Module nicht installieren (PowerShellGetFormatVersion 2.0) und überspringen sie ohne Fehler.
+            ## Neuere Versionen werden nur vorübergehend in einen temporären Ordner geladen und danach gelöscht: systemweit installiert würden sie auf Geräten mit deaktivierter Skriptausführung andere Installationen (zum Beispiel PSWindowsUpdate) blockieren.
             $pg = @(Get-Module -ListAvailable -Name PowerShellGet | Sort-Object -Property Version -Descending) | Select-Object -First 1
-            if (-not $pg -or $pg.Version -lt [version]'2.2.5') {
-                Write-Zeile ('PowerShellGet {0} ist zu alt, aktualisiere auf 2.2.5 oder neuer' -f $(if ($pg) { $pg.Version } else { 'fehlt' }))
-                Install-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
+            $hilfOrdner = $null
+            $befehl = 'Install-Module -Name HPCMSL -Scope AllUsers -Force -AcceptLicense -SkipPublisherCheck -ErrorAction Stop'
+            try {
+                if (-not $pg -or $pg.Version -lt [version]'2.2.5') {
+                    $hilfOrdner = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('NetCockpitPsGet_' + [guid]::NewGuid().ToString('N'))
+                    Write-Zeile ('PowerShellGet {0} ist zu alt, lade eine neuere Version vorübergehend nach {1}' -f $(if ($pg) { $pg.Version } else { 'fehlt' }), $hilfOrdner)
+                    New-Item -ItemType Directory -Path $hilfOrdner -Force | Out-Null
+                    Save-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Path $hilfOrdner -Force -ErrorAction Stop
+                    $befehl = ('$env:PSModulePath = ''{0};'' + $env:PSModulePath; Import-Module -Name PackageManagement -MinimumVersion 1.4.4 -Force; Import-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Force; ' -f $hilfOrdner) + $befehl
+                }
+                ## HPCMSL in einem frischen Prozess installieren, damit die neue PowerShellGet-Version geladen wird
+                Write-Zeile 'Installiere HPCMSL in einem neuen PowerShell-Prozess'
+                $ausgabe = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $befehl 2>&1 | Out-String
+                foreach ($z in @($ausgabe -split "`r?`n")) { if ($z.Trim()) { Write-Zeile ('  ' + $z.TrimEnd()) } }
             }
-            ## HPCMSL in einem frischen Prozess installieren, damit die neue PowerShellGet-Version geladen wird
-            Write-Zeile 'Installiere HPCMSL in einem neuen PowerShell-Prozess'
-            $befehl = 'Import-Module -Name PowerShellGet -MinimumVersion 2.2.5 -Force; Install-Module -Name HPCMSL -Scope AllUsers -Force -AcceptLicense -SkipPublisherCheck -ErrorAction Stop'
-            $ausgabe = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $befehl 2>&1 | Out-String
-            foreach ($z in @($ausgabe -split "`r?`n")) { if ($z.Trim()) { Write-Zeile ('  ' + $z.TrimEnd()) } }
+            finally {
+                if ($hilfOrdner -and (Test-Path -LiteralPath $hilfOrdner)) { Remove-Item -LiteralPath $hilfOrdner -Recurse -Force -ErrorAction SilentlyContinue }
+            }
             if (-not (Get-Module -ListAvailable -Name HPCMSL)) { Write-Zeile 'HPCMSL ist nach der Installation nicht vorhanden'; exit 1 }
             Import-Module -Name HPCMSL -Force -ErrorAction Stop
             Write-Zeile 'HPCMSL geladen, lade und entpacke den HP Image Assistant'

@@ -24,8 +24,9 @@ $script:ModulInfo['OS'] = {
         @{ T = 'i'; X = '**Dieser Rechner:** PowerShell 7, ein Konto mit Administratorrechten auf den Zielgeräten (oder ein Konto je Gerät über Optionen > Konto für markierte Geräte), Port 5985 erreichbar.' }
         @{ T = 'i'; X = '**Geräte ohne Domäne oder per IP** (Kerberos geht dort nicht): Optionen > Verbindung (TrustedHosts) und ein lokales Konto im Format Gerätename\Benutzer. Bei anderen lokalen Administratorkonten als dem eingebauten Administrator kann Windows den Fernzugriff filtern ("Zugriff verweigert").' }
         @{ T = 'h'; X = 'Knöpfe' }
-        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart (mit Dauer), Neustart ausstehend, geplanter Neustart, Modul, verfügbare Updates und Update-Verlauf.' }
+        @{ T = 'i'; X = '**Status prüfen:** Windows-Version, letzter Neustart (mit Dauer), Neustart ausstehend, geplanter Neustart, Modul, verfügbare Updates und Update-Verlauf. Gesucht wird auf zwei Wegen: normale Updates (PSWindowsUpdate) und optionale Updates wie Feature-Updates (zum Beispiel Windows 11, Version 26H2), in der Detailliste mit Art: Optional.' }
         @{ T = 'i'; X = '**Updates installieren:** ohne automatischen Neustart (-IgnoreReboot). Ist ein Neustart nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
+        @{ T = 'i'; X = '**Feature-Update installieren:** lädt ein gefundenes optionales Feature-Update über den Windows-Update-Agent herunter und installiert es (mit Rückfrage, kein automatischer Neustart; Neustart über Aktionen > Neustart planen). Updates installieren lässt Feature-Updates aus.' }
         @{ T = 'i'; X = '**Updates installieren und bei Bedarf neu starten:** Neustart nach 30 Sekunden, nur wenn nötig (mit Rückfrage).' }
         @{ T = 'i'; X = '**Update-Modul nachinstallieren:** PSWindowsUpdate auf Geräten, wo es fehlt. Danach läuft automatisch Status prüfen für dieses Gerät.' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Updates, Update-Verlauf ohne Defender-Definitionen bei "Letzte Updates" (letzte 50 Einträge) und das Log dieses Geräts.' }
@@ -84,7 +85,7 @@ $script:ModulInfo['TREIBER'] = {
         @{ T = 'h'; X = 'Knöpfe' }
         @{ T = 'i'; X = '**Status prüfen:** PC-Hersteller, Modell, Windows-Version, Neustart, Akkubetrieb, Treiber-Tool und Treiber-Updates.' }
         @{ T = 'i'; X = '**Treiber-Updates installieren:** mit Rückfrage, still, nie automatischer Neustart. Ist einer nötig, steht es im Status; auslösen über Aktionen > Neustart planen.' }
-        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. HP: Ist das PowerShellGet auf dem Gerät älter als 2.2.5 (Windows PowerShell 5.1 liefert eine ältere Version), aktualisiert das Modul es vorher; danach wird HPCMSL in einem neuen PowerShell-Prozess installiert (das Gerät braucht Internetzugang zur PSGallery). Danach läuft automatisch Status prüfen für dieses Gerät.' }
+        @{ T = 'i'; X = '**Treiber-Tool nachinstallieren:** mit Rückfrage. Dell: ein inkompatibles Altprodukt wird vorher deinstalliert. HP: Ist das PowerShellGet auf dem Gerät älter als 2.2.5 (Windows PowerShell 5.1 liefert eine ältere Version), lädt das Modul eine neuere Version nur vorübergehend in einen temporären Ordner und löscht ihn danach wieder, damit nichts systemweit zurückbleibt; damit wird HPCMSL in einem neuen PowerShell-Prozess installiert (das Gerät braucht Internetzugang zur PSGallery). Danach läuft automatisch Status prüfen für dieses Gerät.' }
         @{ T = 'i'; X = '**BIOS/Firmware einbeziehen:** standardmäßig aus, bei Akkubetrieb Abbruch. Der Schalter gilt für Status prüfen und Installieren.' }
         @{ T = 'i'; X = '**Details des markierten Geräts...:** verfügbare Treiber, Verlauf der Installationen, Tool-Log und das Log dieses Geräts.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
