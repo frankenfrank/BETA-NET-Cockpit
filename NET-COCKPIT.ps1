@@ -1514,7 +1514,7 @@ function Show-WolKennwort {
 }
 
 ## Info / Voraussetzungen (Reiter mit Suche)
-### Inhalt der Info: Reiter mit Blöcken (h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten, a = Ampelzeile); geladene Module hängen ihren eigenen Reiter an
+### Inhalt der Info: Reiter mit Blöcken (h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten, a = Ampelzeile); die Reiter folgen der Menüleiste; der Reiter Module hat eine Auswahlleiste mit der Hilfe je Modul
 function Get-WolInfoInhalt {
     $inhalt = [System.Collections.Generic.List[object]]::new()
 
@@ -1618,10 +1618,19 @@ function Get-WolInfoInhalt {
         @{ T = 'h'; X = 'PowerShell-Befehl senden' }
         @{ T = 'i'; X = '**PowerShell-Befehl senden...:** führt den Text als PowerShell auf den markierten, grünen Geräten aus (höchstens 20). Die Ausgabe steht pro Gerät in einem eigenen Reiter. Der Befehl läuft als ScriptBlock auf dem Zielgerät, Eingaben wie Read-Host funktionieren dort nicht. "Skript laden..." lädt eine .ps1-Datei in das Textfeld.' }
         @{ T = 'h'; X = 'MouseMover' }
-        @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu im Reiter MouseMover (erscheint nach dem ersten Öffnen).' }
+        @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu weiter unten in diesem Reiter.' }
     ) })
 
-    $inhalt.Add(@{ Titel = 'Konto & Verbindung'; Bloecke = @(
+    $inhalt.Add(@{ Titel = 'Ansicht'; Bloecke = @(
+        @{ T = 'h'; X = 'Spalten' }
+        @{ T = 'i'; X = '**Ansicht > Spalten:** Spalten der Tabelle ein- und ausblenden, wie per Rechtsklick auf eine Spaltenüberschrift. Die Auswahl wird gespeichert.' }
+        @{ T = 'i'; X = '**Anzeigen** (Alle, Nur WinRM, Online Geräte, Offlinegeräte), **Filter** und **Sortieren** stehen im Reiter Tabelle.' }
+    ) })
+
+    $inhalt.Add(@{ Titel = 'Optionen'; Bloecke = @(
+        @{ T = 'h'; X = 'Einstellungen und Daten' }
+        @{ T = 'i'; X = '**Auto-Scan, Auto-Speichern, Parallelität...:** Auto-Scan (Reiter Scan & Status), Auto-Speichern (Reiter Geräteliste) und die Parallelität der Aufträge (Reiter Aktionen, Standard 10).' }
+        @{ T = 'i'; X = '**NET-COCKPIT Daten löschen...:** löscht nach einer Rückfrage den Datenordner (Reiter Geräteliste, Abschnitt Datenordner).' }
         @{ T = 'h'; X = 'Konto pro Gerät' }
         @{ T = 'i'; X = '**Optionen > Konto für markierte Geräte...:** fragt Benutzername und Kennwort ab und setzt das Konto für alle markierten Geräte (Domäne\Benutzer, .\Benutzer für das lokale Konto des jeweiligen Geräts, oder UPN). Haben alle markierten Geräte dasselbe Konto, ist der Benutzername vorbelegt. Bleibt das Kennwort leer, wird nur der Benutzername eingetragen und das Kennwort bei der ersten Aktion abgefragt. Bleibt der Benutzername unverändert, genügt ein neues Kennwort, um nur das Kennwort zu ändern. **Mit aktuellem Konto verbinden** entfernt das eigene Konto wieder; das Gerät nutzt dann das Windows-Konto, mit dem Du angemeldet bist.' }
         @{ T = 'i'; X = '**Kennwort:** Der Benutzername steht in der Geräteliste, das Kennwort wird nur für die laufende Sitzung gemerkt. Nach einem Neustart des Cockpits fragt es das Kennwort bei der nächsten Aktion einmal pro Benutzername ab.' }
@@ -1645,15 +1654,28 @@ function Get-WolInfoInhalt {
         @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
     ) })
 
-    foreach ($schluessel in @($script:Module.Keys | Where-Object { $script:ModulInfo.ContainsKey($_) })) {
-        $inhalt.Add((& $script:ModulInfo[$schluessel]))
+    ### Reiter Module: eine Auswahlleiste, darunter die Hilfe des gewählten Moduls (Reihenfolge wie im Menü Module)
+    $menueModule = 'APP', 'DIAGNOSE', 'M365APP', 'OS', 'RDP', 'TREIBER', 'WATOKI', 'WOL'
+    $seiten = @($menueModule | Where-Object { $script:ModulInfo.ContainsKey($_) } | ForEach-Object { & $script:ModulInfo[$_] })
+    if ($seiten.Count -gt 0) {
+        $inhalt.Add(@{ Titel = 'Module'; Unter = $seiten })
     }
-    if (-not $script:HilfeGeladen) {
+    else {
         $inhalt.Add(@{ Titel = 'Module'; Bloecke = @(
             @{ T = 'w'; X = "Die Hilfe der Module konnte nicht geladen werden. Erwartet wird die Datei $($script:HilfeDatei) im selben Ordner wie das NET-COCKPIT oder, beim Start über start.ps1, der Zugriff auf den Server." }
         ) })
     }
-    return $inhalt
+
+    ### MouseMover gehört zum Menü Werkzeuge: seine Hilfe hängt unten am Reiter Werkzeuge
+    if ($script:ModulInfo.ContainsKey('MOUSEMOVER')) {
+        $mm = & $script:ModulInfo['MOUSEMOVER']
+        $werkzeuge = $inhalt | Where-Object { $_.Titel -eq 'Werkzeuge' } | Select-Object -First 1
+        $werkzeuge.Bloecke = @($werkzeuge.Bloecke) + @(@{ T = 'h'; X = 'MouseMover (Details)' }) + @($mm.Bloecke)
+    }
+
+    ### Reihenfolge der Reiter: wie die Menüleiste
+    $reihenfolge = 'Überblick', 'Scan & Status', 'Tabelle', 'Geräteliste', 'Aktionen', 'Module', 'Werkzeuge', 'Ansicht', 'Optionen', 'Voraussetzungen'
+    return @($reihenfolge | ForEach-Object { $t = $_; $inhalt | Where-Object { $_.Titel -eq $t } })
 }
 
 ### Text mit **fett** und Suchtreffern in einen Absatz schreiben; Rückgabe: Anzahl der Treffer
@@ -1723,6 +1745,14 @@ function New-WolInfoDokument {
 }
 
 ### Info-Fenster
+### Seite eines Info-Reiters anzeigen (bei Reitern mit Auswahlleiste: das gewählte Modul) und die Schaltflächen markieren
+function Set-WolInfoSeite {
+    param($Reiter, [int]$Index)
+    $Reiter.Aktiv = $Index
+    $Reiter.Box.Document = (New-WolInfoDokument -Bloecke $Reiter.Seiten[$Index].Bloecke -Suche $script:InfoAktSuche).Dokument
+    for ($i = 0; $i -lt $Reiter.Knoepfe.Count; $i++) { $Reiter.Knoepfe[$i].IsChecked = ($i -eq $Index) }
+}
+
 function Show-WolInfo {
     Import-WolHilfe
     $d = New-WolFenster @'
@@ -1746,30 +1776,65 @@ function Show-WolInfo {
     $script:InfoSuche = $d.FindName('Suche')
     $script:InfoSucheInfo = $d.FindName('SucheInfo')
     $script:InfoReiter = [System.Collections.Generic.List[object]]::new()
+    $script:InfoAktSuche = ''
     foreach ($r in (Get-WolInfoInhalt)) {
+        $seiten = if ($r.Unter) { @($r.Unter) } else { @(@{ Titel = $r.Titel; Bloecke = $r.Bloecke }) }
         $box = [System.Windows.Controls.RichTextBox]::new()
         $box.IsReadOnly = $true
         $box.BorderThickness = [System.Windows.Thickness]::new(0)
         $box.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
-        $box.Document = (New-WolInfoDokument -Bloecke $r.Bloecke -Suche '').Dokument
         $tab = [System.Windows.Controls.TabItem]::new()
         $tab.Header = $r.Titel
-        $tab.Content = $box
+        $eintrag = @{ Titel = $r.Titel; Seiten = $seiten; Box = $box; Tab = $tab; Treffer = 0; Aktiv = 0; Knoepfe = [System.Collections.Generic.List[object]]::new() }
+        if ($seiten.Count -gt 1) {
+            ### Auswahlleiste mit einer Schaltfläche je Seite (zum Beispiel je Modul)
+            $leiste = [System.Windows.Controls.WrapPanel]::new()
+            $leiste.Margin = [System.Windows.Thickness]::new(4, 6, 4, 4)
+            for ($i = 0; $i -lt $seiten.Count; $i++) {
+                $k = [System.Windows.Controls.Primitives.ToggleButton]::new()
+                $k.Content = $seiten[$i].Titel
+                $k.Padding = [System.Windows.Thickness]::new(10, 4, 10, 4)
+                $k.Margin = [System.Windows.Thickness]::new(0, 0, 6, 4)
+                $k.Tag = @{ Eintrag = $eintrag; Index = $i }
+                $k.Add_Click({ Set-WolInfoSeite -Reiter $this.Tag.Eintrag -Index $this.Tag.Index })
+                [void]$leiste.Children.Add($k)
+                $eintrag.Knoepfe.Add($k)
+            }
+            $dock = [System.Windows.Controls.DockPanel]::new()
+            [System.Windows.Controls.DockPanel]::SetDock($leiste, [System.Windows.Controls.Dock]::Top)
+            [void]$dock.Children.Add($leiste)
+            [void]$dock.Children.Add($box)
+            $tab.Content = $dock
+        }
+        else { $tab.Content = $box }
+        Set-WolInfoSeite -Reiter $eintrag -Index 0
         [void]$script:InfoReiterCtl.Items.Add($tab)
-        $script:InfoReiter.Add(@{ Titel = $r.Titel; Bloecke = $r.Bloecke; Box = $box; Tab = $tab; Treffer = 0 })
+        $script:InfoReiter.Add($eintrag)
     }
     $script:InfoSuche.Add_TextChanged({
         $suche = $script:InfoSuche.Text.Trim()
         if ($suche.Length -lt 2) { $suche = '' }
+        $script:InfoAktSuche = $suche
         $summe = 0
         $erster = $null
         foreach ($r in $script:InfoReiter) {
-            $erg = New-WolInfoDokument -Bloecke $r.Bloecke -Suche $suche
-            $r.Box.Document = $erg.Dokument
-            $r.Treffer = $erg.Treffer
-            $r.Tab.Header = if ($suche -and $erg.Treffer -gt 0) { '{0} ({1})' -f $r.Titel, $erg.Treffer } else { $r.Titel }
-            $summe += $erg.Treffer
-            if ($erg.Treffer -gt 0 -and -not $erster) { $erster = $r.Tab }
+            $r.Treffer = 0
+            for ($i = 0; $i -lt $r.Seiten.Count; $i++) {
+                $erg = New-WolInfoDokument -Bloecke $r.Seiten[$i].Bloecke -Suche $suche
+                $r.Seiten[$i].Treffer = $erg.Treffer
+                $r.Treffer += $erg.Treffer
+                if ($r.Knoepfe.Count -gt $i) {
+                    $r.Knoepfe[$i].Content = if ($suche -and $erg.Treffer -gt 0) { '{0} ({1})' -f $r.Seiten[$i].Titel, $erg.Treffer } else { $r.Seiten[$i].Titel }
+                }
+            }
+            $aktiv = $r.Aktiv
+            if ($suche -and $r.Treffer -gt 0 -and $r.Seiten[$aktiv].Treffer -eq 0) {
+                $aktiv = @(0..($r.Seiten.Count - 1) | Where-Object { $r.Seiten[$_].Treffer -gt 0 })[0]
+            }
+            Set-WolInfoSeite -Reiter $r -Index $aktiv
+            $r.Tab.Header = if ($suche -and $r.Treffer -gt 0) { '{0} ({1})' -f $r.Titel, $r.Treffer } else { $r.Titel }
+            $summe += $r.Treffer
+            if ($r.Treffer -gt 0 -and -not $erster) { $erster = $r.Tab }
         }
         if (-not $suche) { $script:InfoSucheInfo.Text = ''; return }
         $script:InfoSucheInfo.Text = if ($summe -gt 0) { "$summe Treffer" } else { 'keine Treffer' }

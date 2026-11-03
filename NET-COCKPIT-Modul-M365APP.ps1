@@ -8,6 +8,7 @@
     - Das Fenster zeigt den Ablauf, den Status der benötigten PowerShell-Module, die Berechtigungen der App (immer gesetzte und optional wählbare per Haken) und die Ablage der Dateien
     - Der Button startet das eingebaute Skript in einem eigenen PowerShell-7-Fenster ohne Administratorrechte (läuft das NET-COCKPIT als Administrator, startet es mit eingeschränktem Token über runas /trustlevel); das Skript prüft beim Start selbst, ob es erhöht läuft, und bricht dann ab
     - Das Skript wird als Temp-Datei abgelegt und löscht sich beim Start selbst; Anmeldung im Kunden-Tenant per Geräteanmeldung, Zertifikat und PFX unter C:\WorkDir\M365-Cockpit\M365-Tenantinfo, Tenantinfos in kunden-tenantinfos.json
+    - Beim Öffnen fragt das Modul, ob das NET-COCKPIT auf dem eigenen Rechner läuft (personalisierter Admin-Zugang, nicht auf Kunden-, Fremd- oder öffentlichen Geräten ausführen)
     - Kein Gerätebezug: das Modul braucht keine markierten Geräte und legt keine Spalten an
     Das Modul speichert nichts im Datenordner des NET-COCKPIT.
 #>
@@ -636,6 +637,9 @@ function script:Open-WolMaPortal {
 ## Wird vom Menü Module > M365-Wartungs-App aufgerufen: Fenster neben der Tabelle (bleibt offen, die Tabelle bleibt bedienbar)
 function script:Show-WolModulM365APP {
     if ($script:MaFenster) { [void]$script:MaFenster.Activate(); return }
+    ### Warnung: nur auf dem eigenen Rechner (personalisierter Admin-Zugang)
+    $antwort = [System.Windows.MessageBox]::Show($script:Fenster, "Die M365-Wartungs-App nur auf Deinem eigenen Rechner ausführen, also auf dem Rechner, von dem aus Du Dich mit dem Tenant verbindest.`n`nDie Anmeldung läuft über Deinen personalisierten Admin-Zugang im Kunden-Tenant. Dieser Zugang gehört nicht auf ein Kundensystem, ein fremdes oder ein öffentliches Gerät.`n`nLäuft das NET-COCKPIT gerade auf Deinem eigenen Rechner?", 'M365-Wartungs-App', 'YesNo', 'Warning')
+    if ($antwort -ne 'Yes') { return }
     $f = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"

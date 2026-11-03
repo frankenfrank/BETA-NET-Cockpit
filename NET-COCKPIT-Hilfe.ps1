@@ -144,6 +144,7 @@ $script:ModulInfo['WATOKI'] = {
 ## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
 $script:ModulInfo['M365APP'] = {
     @{ Titel = 'M365-Wartungs-App'; Bloecke = @(
+        @{ T = 'w'; X = '**Nur auf dem eigenen Rechner ausführen,** also auf dem Rechner, von dem aus Du Dich mit dem Tenant verbindest. Die Anmeldung läuft über Deinen **personalisierten Admin-Zugang** im Kunden-Tenant, Zertifikat und Tenantinfos landen unter Deinem Benutzer. Dieser Zugang gehört nicht auf ein Kundensystem, ein fremdes oder ein öffentliches Gerät.' }
         @{ T = 'h'; X = 'Was macht das Modul?' }
         @{ T = 'p'; X = 'Legt im **Kunden-Tenant** die Wartungs-App **MAHR-EDV-Wartung** für das M365-Cockpit an oder aktualisiert sie: App-Registrierung, Service Principal, Zertifikat und Berechtigungen. Das Fenster öffnet sich über **Module > M365-Wartungs-App**, zeigt vorher, was installiert und angelegt wird, und bleibt neben der Tabelle offen. Das Modul braucht **keine markierten Geräte**.' }
         @{ T = 'h'; X = 'Bedienung' }
