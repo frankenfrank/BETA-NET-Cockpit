@@ -141,31 +141,6 @@ $script:ModulInfo['WATOKI'] = {
     ) }
 }
 
-# M365-Wartungs-App
-## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
-$script:ModulInfo['M365APP'] = {
-    @{ Titel = 'M365-Wartungs-App'; Bloecke = @(
-        @{ T = 'w'; X = '**Nur auf dem eigenen Rechner ausführen,** also auf dem Rechner, von dem aus Du Dich mit dem Tenant verbindest. Die Anmeldung läuft über Deinen **personalisierten Admin-Zugang** im Kunden-Tenant, Zertifikat und Tenantinfos landen unter Deinem Benutzer. Dieser Zugang gehört nicht auf ein Kundensystem, ein fremdes oder ein öffentliches Gerät.' }
-        @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Legt im **Kunden-Tenant** die Wartungs-App **MAHR-EDV-Wartung** für das M365-Cockpit an oder aktualisiert sie: App-Registrierung, Service Principal, Zertifikat und Berechtigungen. Das Fenster öffnet sich über **Module > M365-Wartungs-App**, zeigt vorher, was installiert und angelegt wird, und bleibt neben der Tabelle offen. Das Modul braucht **keine markierten Geräte**.' }
-        @{ T = 'h'; X = 'Bedienung' }
-        @{ T = 'i'; X = '**Ablauf** (steht im Fenster): Anmeldung im Tenant, App und Service Principal, Zertifikat, Berechtigungen, Tenantinfos speichern, Admin-Consent im Entra-Portal.' }
-        @{ T = 'i'; X = '**PowerShell-Module:** Microsoft.Graph.Authentication und Microsoft.Graph.Applications. Das Fenster zeigt, ob sie installiert sind (**Module prüfen** liest neu). Fehlt eins, fragt das Skript beim Start, ob es für dein Benutzerkonto installiert werden soll (Install-Module -Scope CurrentUser).' }
-        @{ T = 'i'; X = '**Berechtigungen:** die oberen werden immer gesetzt (Microsoft Graph, Anwendungsberechtigungen, nur lesend, außer **User.ReadWrite.All** als Schreibrecht, rot markiert). Darunter lassen sich per **Haken** weitere wählen (beim Öffnen immer aus). Die Haken gelten für den nächsten Start.' }
-        @{ T = 'i'; X = '**Wartungs-App anlegen / aktualisieren...:** startet das Skript in einem eigenen PowerShell-7-Fenster **ohne Administratorrechte**. Dort läuft die Anmeldung per Geräteanmeldung (Global Administrator des Kunden); die Abfragen (PFX-Kennwort, KuDo-Hinweise) stehen im Skriptfenster.' }
-        @{ T = 'i'; X = '**Ordner Tenantinfo öffnen** zeigt C:\WorkDir\M365-Cockpit\M365-Tenantinfo im Explorer, **Entra-Portal öffnen** die App-Registrierungen im Standardbrowser.' }
-        @{ T = 'h'; X = 'Zertifikat und Ablage' }
-        @{ T = 'i'; X = '**Neues Zertifikat** (wenn die App noch keins hat): selbstsigniert, 2 Jahre, im Zertifikatspeicher des Benutzers und als PFX in C:\WorkDir\M365-Cockpit\M365-Tenantinfo\MAHR-EDV-Wartung-Cert. Kennwort und PFX-Datei gehören in den KuDo-Eintrag **M365 Mahr-EDV-Wartung Zertifikatspasswort** des Kunden.' }
-        @{ T = 'i'; X = '**Vorhandenes Zertifikat:** Hat die App schon eins, das auf diesem Rechner fehlt, fordert das Skript auf, die PFX-Datei aus KuDo in den Ordner zu legen. So lässt sich das Skript auch später erneut ausführen, um Berechtigungen nachzuziehen.' }
-        @{ T = 'i'; X = '**Tenantinfos:** C:\WorkDir\M365-Cockpit\M365-Tenantinfo\kunden-tenantinfos.json (Tenant-ID, Client-ID, Domain, PFX-Pfad, Thumbprint je Kunde).' }
-        @{ T = 'h'; X = 'Gut zu wissen' }
-        @{ T = 'i'; X = '**Ohne Administratorrechte:** Läuft das NET-COCKPIT als Administrator, startet das Modul das Skript mit eingeschränktem Token (runas /trustlevel). Das Skript prüft beim Start selbst und bricht mit einem Hinweis ab, wenn es doch erhöht läuft.' }
-        @{ T = 'i'; X = '**Admin-Consent:** Nach dem Lauf müssen die Berechtigungen im Entra-Portal unter App-Registrierungen > MAHR-EDV-Wartung > API-Berechtigungen bestätigt werden (Seite mit F5 aktualisieren).' }
-        @{ T = 'i'; X = '**Skript:** Das Modul legt es als Temp-Datei ab, es löscht sich beim Start selbst. Das Modul speichert nichts im Datenordner des NET-COCKPIT.' }
-        @{ T = 'w'; X = 'Noch nicht getestet: Fenster, Start ohne Administratorrechte (runas /trustlevel), Lauf des Skripts gegen einen Tenant.' }
-    ) }
-}
-
 # RDP
 ## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
 $script:ModulInfo['RDP'] = {

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    NET-COCKPIT - Netzwerkscan, Neustart, Herunterfahren und Geräteinformationen für die KuDo, mit nachladbaren Modulen (Updates, Diagnose, M365-Wartungs-App und WaToKi)
+    NET-COCKPIT - Netzwerkscan, Neustart, Herunterfahren und Geräteinformationen für die KuDo, mit nachladbaren Modulen (Updates, Diagnose und WaToKi)
 
 .DESCRIPTION
     PowerShell-7-/WPF-Oberfläche zum Verwalten von Geräten, die meist ausgeschaltet sind.
@@ -21,11 +21,10 @@
     - Konto pro Gerät (Spalte "Konto"; Dialog mit vorbelegtem Benutzernamen, leeres Kennwort erlaubt = Abfrage bei der ersten Aktion); scheitert eine Verbindung an den TrustedHosts, bietet das Cockpit das Eintragen an
     - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
-    - Module im Menü Module (OS, APP, Treiber, Diagnose, M365-Wartungs-App, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
     - Info: Reiter Voraussetzungen mit Allgemein sowie je einer Anleitung zur Grundfreischaltung (WinRM und Ping) per GPO und per Intune
     - Hilfetexte der Module: Datei NET-COCKPIT-Hilfe.ps1 neben dem Cockpit; die Info lädt sie beim Öffnen (bei Bedarf vom Server), damit alle Modul-Reiter ohne Start der Module lesbar sind
     - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
-    - Modul M365-Wartungs-App: legt im Kunden-Tenant die Wartungs-App MAHR-EDV-Wartung für das M365-Cockpit an oder aktualisiert sie (App-Registrierung, Zertifikat, Berechtigungen); zeigt vorher, was installiert wird, wählt zusätzliche Berechtigungen per Haken und startet das eingebaute Skript in einem eigenen PowerShell-Fenster ohne Administratorrechte (kein Gerätebezug)
     - Modul WOL: Wake-on-LAN prüfen und einrichten (Netzwerkkarte, Schnellstart, BIOS bei Dell, HP, Lenovo), Tool nachinstallieren (Dell) und Geräte per Magic Packet aufwecken
     - Modul WaToKi (Spalte "Wartungsreihenfolge", bearbeitbar, wird mit der Geräteliste gespeichert; sichtbar, wenn im Fenster der Haken für die Spalte gesetzt ist): startet die Wartungsskripte aus dem Unterordner WaToKi in einem eigenen PowerShell-Fenster, immer nur eines gleichzeitig; markierte Geräte und der Ausgabeordner (Modul-WaToKi im Datenordner) werden übergeben, wenn das Skript die Parameter -Ziel, -Ausgabeordner und -Anmeldedaten kennt (Konto aus der Spalte Konto)
 
@@ -37,7 +36,7 @@
     - Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen: WinRM (TCP 5985) und Administratorrechte auf dem Ziel (Windows)
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
-    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-M365APP.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
+    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
     - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel) und legt zusätzlich die Datei net-cockpit-server.json neben das Cockpit; fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
@@ -137,7 +136,6 @@ $script:Module = [ordered]@{
     TREIBER = @{ Name = 'Treiber-Updates'; Datei = 'NET-COCKPIT-Modul-TREIBER.ps1'; Geladen = $false }
     DIAGNOSE = @{ Name = 'Diagnose';       Datei = 'NET-COCKPIT-Modul-DIAGNOSE.ps1'; Geladen = $false }
     WATOKI  = @{ Name = 'WaToKi';          Datei = 'NET-COCKPIT-Modul-WATOKI.ps1';  Geladen = $false }
-    M365APP = @{ Name = 'M365-Wartungs-App'; Datei = 'NET-COCKPIT-Modul-M365APP.ps1'; Geladen = $false }
     RDP     = @{ Name = 'RDP';             Datei = 'NET-COCKPIT-Modul-RDP.ps1';     Geladen = $false }
     MOUSEMOVER = @{ Name = 'MouseMover';   Datei = 'NET-COCKPIT-Modul-MOUSEMOVER.ps1'; Geladen = $false }
     WOL     = @{ Name = 'WOL';             Datei = 'NET-COCKPIT-Modul-WOL.ps1';     Geladen = $false }
@@ -1832,7 +1830,7 @@ function Get-WolInfoInhalt {
 
     $inhalt.Add(@{ Titel = 'Überblick'; Bloecke = @(
         @{ T = 'h'; X = 'Was macht das NET-COCKPIT?' }
-        @{ T = 'p'; X = 'Das Cockpit sammelt Geräte in einer **Geräteliste** (per Scan, aus einer OU oder aus einer geladenen Datei) und bietet **Neustart**, **Neustart planen**, **Herunterfahren**, **Portscan**, **Dauerping**, **PowerShell-Befehle**, die **KuDo-Informationen**, **Neuer Client** und **Einzel-Scan** und im Menü **Module** die Module für OS-, APP- und Treiber-Updates sowie die **Diagnose** (Ereignislog, Dienste, Prozesse), **WaToKi** (Wartungsskripte starten), **M365-Wartungs-App** (Wartungs-App im Kunden-Tenant anlegen) und **WOL** (Wake-on-LAN prüfen, einrichten und Geräte aufwecken).' }
+        @{ T = 'p'; X = 'Das Cockpit sammelt Geräte in einer **Geräteliste** (per Scan, aus einer OU oder aus einer geladenen Datei) und bietet **Neustart**, **Neustart planen**, **Herunterfahren**, **Portscan**, **Dauerping**, **PowerShell-Befehle**, die **KuDo-Informationen**, **Neuer Client** und **Einzel-Scan** und im Menü **Module** die Module für OS-, APP- und Treiber-Updates sowie die **Diagnose** (Ereignislog, Dienste, Prozesse), **WaToKi** (Wartungsskripte starten) und **WOL** (Wake-on-LAN prüfen, einrichten und Geräte aufwecken).' }
         @{ T = 'h'; X = 'Typischer Ablauf' }
         @{ T = 'i'; X = '**1. Liste bereitstellen:** Datei > Neue Liste (leer anfangen), Datei > Öffnen, Datei > OU wählen oder ein Netz wählen und scannen. Das Cockpit startet immer leer.' }
         @{ T = 'i'; X = '**2. Geräte markieren:** Zeilen anklicken wie im Explorer (Strg+Klick, Umschalt+Klick, Ziehen, Strg+A).' }
@@ -2051,7 +2049,7 @@ function Get-WolInfoInhalt {
     ) })
 
     ### Reiter Module: eine Auswahlleiste, darunter die Hilfe des gewählten Moduls (Reihenfolge wie im Menü Module)
-    $menueModule = 'APP', 'DIAGNOSE', 'M365APP', 'OS', 'RDP', 'TREIBER', 'WATOKI', 'WOL'
+    $menueModule = 'APP', 'DIAGNOSE', 'OS', 'RDP', 'TREIBER', 'WATOKI', 'WOL'
     $seiten = @($menueModule | Where-Object { $script:ModulInfo.ContainsKey($_) } | ForEach-Object { & $script:ModulInfo[$_] })
     if ($seiten.Count -gt 0) {
         $inhalt.Add(@{ Titel = 'Module'; Unter = $seiten })
@@ -2535,7 +2533,6 @@ $script:Fenster = New-WolFenster @'
       <MenuItem Header="Module">
         <MenuItem x:Name="MnuUpdApp" Header="APP"/>
         <MenuItem x:Name="MnuDiagnose" Header="Diagnose"/>
-        <MenuItem x:Name="MnuM365App" Header="M365-Wartungs-App"/>
         <MenuItem x:Name="MnuUpdOs" Header="OS"/>
         <MenuItem x:Name="MnuRdp" Header="RDP"/>
         <MenuItem x:Name="MnuUpdTreiber" Header="Treiber"/>
@@ -5425,7 +5422,6 @@ $script:MenueAktionen = [ordered]@{
     MnuUpdTreiber        = { Open-WolModul -Key 'TREIBER' }
     MnuDiagnose          = { Open-WolModul -Key 'DIAGNOSE' }
     MnuWatoki            = { Open-WolModul -Key 'WATOKI' }
-    MnuM365App           = { Open-WolModul -Key 'M365APP' }
     MnuRdp               = { Open-WolModul -Key 'RDP' }
     MnuWol               = { Open-WolModul -Key 'WOL' }
     MnuPortscan          = { Start-WolPortscan }
