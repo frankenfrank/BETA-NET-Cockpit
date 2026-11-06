@@ -166,6 +166,26 @@ $script:ModulInfo['RDP'] = {
     ) }
 }
 
+# SSH
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['SSH'] = {
+    @{ Titel = 'SSH'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Öffnet für jedes markierte Gerät ein **eigenes PowerShell-Fenster mit ssh.exe** (OpenSSH-Client von Windows, kein Zusatztool). Aufruf über **Module > SSH**.' }
+        @{ T = 'h'; X = 'Ablauf' }
+        @{ T = 'i'; X = '**Geräte markieren, Module > SSH:** Es erscheint ein kleines Fenster mit den markierten Geräten, dem **Port** (Vorgabe 22, gilt für alle markierten Geräte) und dem Feld **Benutzer für Geräte ohne Konto**. **Verbinden** öffnet je Gerät ein Fenster. Ziel ist der Hostname, sonst die IP-Adresse.' }
+        @{ T = 'i'; X = '**Benutzer:** aus der Spalte "Konto" des Geräts, genau so, wie er dort steht (bei Linux-Geräten der SSH-Benutzer). Ist die Spalte leer, gilt der Benutzer aus dem Feld darunter. Ist beides leer, meldet das Fenster die betroffenen Geräte und nichts startet.' }
+        @{ T = 'i'; X = '**Kennwort:** Das NET-COCKPIT speichert und übergibt keins. ssh.exe fragt es im jeweiligen Fenster selbst ab, ebenso die Rückfrage zum Hostschlüssel beim ersten Verbinden.' }
+        @{ T = 'i'; X = '**Nach dem Ende der Verbindung** bleibt das Fenster offen, bis Enter gedrückt wird, damit Fehlermeldungen lesbar bleiben.' }
+        @{ T = 'h'; X = 'Gut zu wissen' }
+        @{ T = 'i'; X = '**Voraussetzung:** Der OpenSSH-Client ist installiert (Windows: Einstellungen > System > Optionale Features > OpenSSH-Client) und auf dem Gerät läuft ein SSH-Server. Fehlt ssh.exe, sagt das Modul es.' }
+        @{ T = 'i'; X = '**Konto mit Domäne:** Steht in der Spalte zum Beispiel DOMÄNE\Benutzer, übergibt das Modul den Namen unverändert an ssh.exe. Ob das Gerät diesen Namen akzeptiert, hängt vom Gerät ab.' }
+        @{ T = 'i'; X = '**Port und Benutzer** bleiben nur bis zum Beenden des NET-COCKPIT im Fenster erhalten und werden nicht gespeichert.' }
+        @{ T = 'i'; X = '**Log:** Start der Fenster steht im Log des NET-COCKPIT.' }
+        @{ T = 'w'; X = 'Noch nicht getestet: Aufruf über das Menü, Fenster mit ssh.exe, Port-Eingabe und mehrere markierte Geräte auf einem echten Rechner.' }
+    ) }
+}
+
 # MouseMover
 ## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
 $script:ModulInfo['MOUSEMOVER'] = {

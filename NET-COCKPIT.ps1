@@ -21,7 +21,7 @@
     - Konto pro Gerät (Spalte "Konto"; Dialog mit vorbelegtem Benutzernamen, leeres Kennwort erlaubt = Abfrage bei der ersten Aktion); scheitert eine Verbindung an den TrustedHosts, bietet das Cockpit das Eintragen an
     - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
-    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, SSH, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
     - Info: Reiter Voraussetzungen mit Allgemein sowie je einer Anleitung zur Grundfreischaltung (WinRM und Ping) per GPO und per Intune
     - Hilfetexte der Module: Datei NET-COCKPIT-Hilfe.ps1 neben dem Cockpit; die Info lädt sie beim Öffnen (bei Bedarf vom Server), damit alle Modul-Reiter ohne Start der Module lesbar sind
     - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
@@ -36,7 +36,7 @@
     - Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen: WinRM (TCP 5985) und Administratorrechte auf dem Ziel (Windows)
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
-    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
+    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-SSH.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
     - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel) und legt zusätzlich die Datei net-cockpit-server.json neben das Cockpit; fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
@@ -137,6 +137,7 @@ $script:Module = [ordered]@{
     DIAGNOSE = @{ Name = 'Diagnose';       Datei = 'NET-COCKPIT-Modul-DIAGNOSE.ps1'; Geladen = $false }
     WATOKI  = @{ Name = 'WaToKi';          Datei = 'NET-COCKPIT-Modul-WATOKI.ps1';  Geladen = $false }
     RDP     = @{ Name = 'RDP';             Datei = 'NET-COCKPIT-Modul-RDP.ps1';     Geladen = $false }
+    SSH     = @{ Name = 'SSH';             Datei = 'NET-COCKPIT-Modul-SSH.ps1';     Geladen = $false }
     MOUSEMOVER = @{ Name = 'MouseMover';   Datei = 'NET-COCKPIT-Modul-MOUSEMOVER.ps1'; Geladen = $false }
     WOL     = @{ Name = 'WOL';             Datei = 'NET-COCKPIT-Modul-WOL.ps1';     Geladen = $false }
 }
@@ -448,6 +449,26 @@ function Restore-WolWerteZeile {
     foreach ($schluessel in @($script:WerteKeys) + 'WerteStand') {
         if ($eintrag.ContainsKey($schluessel) -and -not $Zeile[$schluessel]) { $Zeile[$schluessel] = [string]$eintrag[$schluessel] }
     }
+    if ($eintrag.ContainsKey('Ports') -and -not $Zeile.Ports) { $Zeile.Ports = [string]$eintrag['Ports'] }
+}
+
+### Ergebnis des Portscans (Portliste oder "keine offen") in der Werte-Datei merken
+function Save-WolPortsWert {
+    param($Zeile)
+    try {
+        $text = ([string]$Zeile.Ports).Trim()
+        if ($text -notmatch '^\d' -and $text -notlike 'keine offen*') { return }
+        Import-WolWerte
+        $id = Get-WolWerteId -Zeile $Zeile
+        if (-not $id) { return }
+        $eintrag = $(if ($script:WerteSpeicher.ContainsKey($id)) { $script:WerteSpeicher[$id] } else { @{} })
+        if ([string]$eintrag['Ports'] -eq $text) { return }
+        $eintrag['Ports'] = $text
+        $script:WerteSpeicher[$id] = $eintrag
+        if (-not (Test-Path -LiteralPath $script:DatenOrdner)) { New-Item -Path $script:DatenOrdner -ItemType Directory -Force | Out-Null }
+        $script:WerteSpeicher | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $script:WerteDatei -Encoding utf8
+    }
+    catch { Write-WolLog "Offene Ports konnten nicht gespeichert werden: $($_.Exception.Message)" }
 }
 
 ### Alle Zeilen der Tabelle auffüllen (beim Öffnen eines Moduls)
@@ -737,7 +758,7 @@ function Resolve-WolKonten {
 # Scan-Block
 ## Läuft als Thread-Job: Ping, WinRM-Port, Hostname, MAC (ARP), Hersteller (OUI)
 $script:ScanBlock = {
-    param([string[]]$Adressen, [int]$Drossel, [string]$OuiPfad)
+    param([string[]]$Adressen, [int]$Drossel, [string]$OuiPfad, [bool]$Tief = $false)
 
     $gefunden = @($Adressen | ForEach-Object -ThrottleLimit $Drossel -Parallel {
         $ip = $_
@@ -771,6 +792,29 @@ $script:ScanBlock = {
         foreach ($a in $_.IPv4Address) { if ($karte.LinkLayerAddress) { $arp[$a.IPAddress] = $karte.LinkLayerAddress } }
     }
 
+    # Tiefer Scan: Geräte, die nicht auf Ping antworten, aber in der ARP-Tabelle des Scanbereichs mit gültiger MAC stehen (nur Zustand Reachable)
+    $stumme = @()
+    if ($Tief) {
+        $eigene = [System.Collections.Generic.HashSet[string]]::new()
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { [void]$eigene.Add([string]$_.IPAddress) }
+        $imBereich = [System.Collections.Generic.HashSet[string]]::new([string[]]$Adressen)
+        $schonDa = [System.Collections.Generic.HashSet[string]]::new([string[]]@($gefunden | ForEach-Object { [string]$_.IP }))
+        $stumme = @(Get-NetNeighbor -AddressFamily IPv4 -State Reachable -ErrorAction SilentlyContinue | Where-Object {
+            $mac = ([string]$_.LinkLayerAddress -replace '[^0-9A-Fa-f]', '').ToUpper()
+            $imBereich.Contains([string]$_.IPAddress) -and -not $schonDa.Contains([string]$_.IPAddress) -and -not $eigene.Contains([string]$_.IPAddress) -and
+            $mac.Length -eq 12 -and $mac -ne '000000000000' -and $mac -ne 'FFFFFFFFFFFF' -and -not $mac.StartsWith('01005E')
+        } | ForEach-Object {
+            $name = ''
+            try {
+                $dns = [System.Net.Dns]::GetHostEntryAsync([string]$_.IPAddress)
+                if ($dns.Wait(2500)) { $name = $dns.Result.HostName }
+            } catch { }
+            if ($name -eq [string]$_.IPAddress) { $name = '' }
+            [pscustomobject]@{ IP = [string]$_.IPAddress; Hostname = $name; WinRM = $false; Stumm = $true }
+        })
+        $gefunden = @($gefunden) + @($stumme)
+    }
+
     # Hersteller aus lokaler OUI-Liste (ohne Liste bleibt der Hersteller leer)
     $oui = @{}
     $ouiFehler = ''
@@ -788,7 +832,7 @@ $script:ScanBlock = {
         }
         $hersteller = ''
         if ($mac) { $hersteller = [string]$oui[$mac.Replace(':', '').Substring(0, 6)] }
-        [pscustomobject]@{ IP = $g.IP; Hostname = $g.Hostname; WinRM = $g.WinRM; MAC = $mac; Hersteller = $hersteller }
+        [pscustomobject]@{ IP = $g.IP; Hostname = $g.Hostname; WinRM = $g.WinRM; MAC = $mac; Hersteller = $hersteller; Stumm = [bool]$g.Stumm }
     }
 
     [pscustomobject]@{ Gefunden = @($ergebnis); OuiFehler = $ouiFehler }
@@ -1844,6 +1888,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Menüleiste:** Datei, Aktionen, Module, Werkzeuge, Ansicht, Optionen und Hilfe.' }
         @{ T = 'i'; X = '**Scan-Bereich:** Netzauswahl und die Knöpfe "Scan starten" und "Scan stoppen".' }
         @{ T = 'i'; X = '**Tabelle:** alle Geräte, unter jeder Spaltenüberschrift ein Filterfeld. **Log** und die Anzeige der Geräteliste stehen darunter.' }
+        @{ T = 'i'; X = '**Statusleiste unten:** rechts steht "Markierte Geräte: Zahl" (Anzahl der markierten Zeilen der angezeigten Tabelle).' }
     ) })
 
     $inhalt.Add(@{ Titel = 'Scan & Status'; Bloecke = @(
@@ -1852,6 +1897,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Anderes Netz eingeben:** Netze (Netzadresse/Präfixlänge, /22 bis /30), IP-Bereiche (von-bis) und einzelne IP-Adressen, mehrere mit Komma getrennt, insgesamt höchstens 1024 Adressen.' }
         @{ T = 'w'; X = 'MAC-Adresse und Hersteller kommen aus der ARP-Tabelle und gibt es nur im eigenen Subnetz. Ohne MAC ist kein Aufwecken möglich.' }
         @{ T = 'h'; X = 'Scan' }
+        @{ T = 'i'; X = '**Tiefer Scan (auch ARP-Tabelle):** Haken neben "Scan starten", beim Start immer aus. Nach dem Ping-Durchlauf nimmt der Scan zusätzlich Geräte auf, die nicht auf Ping antworten, aber in der ARP-Tabelle dieses PCs mit gültiger MAC im Scanbereich stehen (nur Zustand Reachable, ohne eigene IPs, Broadcast und Multicast). Sie bekommen den Status "nur ARP (antwortet nicht auf Ping)" und eine graue Ampel. Das gilt nur im eigenen Subnetz, hinter einem Router sieht der PC keine ARP-Einträge der Geräte. Das Log nennt, wie viele Geräte der Tiefe Scan zusätzlich fand.' }
         @{ T = 'i'; X = '**Scan starten:** scannt sofort. Ist der Auto-Scan aktiv, wiederholt sich der Scan danach im eingestellten Abstand. **Scan stoppen** bricht ab und hält den Auto-Scan an.' }
         @{ T = 'i'; X = '**Was der Scan einträgt:** Er sucht neue Geräte und trägt sie ein. Die Zuordnung zu bekannten Geräten läuft über die MAC-Adresse; dabei aktualisiert er IP, Hostname und Hersteller. Eine Zeile ohne MAC mit derselben IP (zum Beispiel aus der OU) wird mit der gefundenen MAC-Zeile zusammengeführt. Steht eine IP jetzt bei einem Gerät mit anderer MAC, wird sie beim alten Eintrag entfernt (Status "IP veraltet"); Hostname, MAC und Bemerkung bleiben. Neue Geräte meldet die orange Statuszeile.' }
         @{ T = 'h'; X = 'Statusprüfung' }
@@ -1874,7 +1920,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Hostname, Typ, MAC und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
         @{ T = 'i'; X = '**MAC von Hand eintragen oder ändern:** erlaubt sind 00:20:6b:f4:cd:28, 00-20-6b-f4-cd-28 und 00206bf4cd28; gespeichert und angezeigt wird sie als 00:20:6B:F4:CD:28. Eine MAC, die schon in einer anderen Zeile steht, wird abgelehnt (Esc verwirft die Eingabe). Der Hersteller wird neu aus der Herstellerliste bestimmt; eine geleerte MAC leert auch den Hersteller. Gedacht für Geräte, deren MAC nicht automatisch ermittelt werden kann (zum Beispiel Drucker in einem anderen Netz).' }
         @{ T = 'i'; X = '**Doppelklick auf "Aktion / Status"** öffnet das Log dieses Geräts: die Zeilen des Cockpit-Logs und die Logs der Module APP, OS und Treiber, nur für dieses Gerät (mit Aktualisieren).' }
-        @{ T = 'i'; X = '**Doppelklick auf ein Gerät** (in allen anderen Spalten als den bearbeitbaren und Aktion / Status) öffnet das Detailfenster mit allen Infos, den offenen Ports (eingeklappt, per Klick aufklappbar), der Bemerkung und den gespeicherten KuDo-Informationen.' }
+        @{ T = 'i'; X = '**Doppelklick auf ein Gerät** (in allen anderen Spalten als den bearbeitbaren und Aktion / Status) öffnet das Detailfenster mit allen Infos, den offenen Ports (eingeklappt, per Klick aufklappbar), der Bemerkung und den gespeicherten KuDo-Informationen. Dasselbe macht der Knopf **Gerätedetails** über der Tabelle für das markierte Gerät. Die offenen Ports bleiben je Gerät in NET-COCKPIT-werte.json gespeichert.' }
         @{ T = 'h'; X = 'Besondere Spalten' }
         @{ T = 'i'; X = '**Typ:** frei editierbar. Beim Auslesen der KuDo-Informationen trägt das Cockpit den erkannten Typ ein, aber nur, wenn die Zelle leer ist.' }
         @{ T = 'i'; X = '**Konto:** das Konto, mit dem das Gerät per WinRM angesprochen wird (bei Linux-Geräten der SSH-Benutzer). Ohne eigenes Konto steht dort das Konto, mit dem Du angemeldet bist. Gespeichert wird nur der Benutzername, nie das Kennwort.' }
@@ -2049,7 +2095,7 @@ function Get-WolInfoInhalt {
     ) })
 
     ### Reiter Module: eine Auswahlleiste, darunter die Hilfe des gewählten Moduls (Reihenfolge wie im Menü Module)
-    $menueModule = 'APP', 'DIAGNOSE', 'OS', 'RDP', 'TREIBER', 'WATOKI', 'WOL'
+    $menueModule = 'APP', 'DIAGNOSE', 'OS', 'RDP', 'SSH', 'TREIBER', 'WATOKI', 'WOL'
     $seiten = @($menueModule | Where-Object { $script:ModulInfo.ContainsKey($_) } | ForEach-Object { & $script:ModulInfo[$_] })
     if ($seiten.Count -gt 0) {
         $inhalt.Add(@{ Titel = 'Module'; Unter = $seiten })
@@ -2417,6 +2463,12 @@ function Show-WolDetails {
         $portKopf.Header = 'Noch kein Portscan durchgeführt'
         $portKopf.IsEnabled = $false
     }
+    elseif (([string]$Zeile.Ports).Trim() -notmatch '^\d') {
+        ## Statustext statt Portliste (keine offen, Portscan läuft, abgebrochen, Fehler)
+        $portKopf.Header = ([string]$Zeile.Ports).Trim()
+        $portKopf.IsEnabled = $false
+        $eintraege = @()
+    }
     elseif ($eintraege.Count -eq 1) { $portKopf.Header = '1 offener Port (zum Aufklappen klicken)' }
     else { $portKopf.Header = ('{0} offene Ports (zum Aufklappen klicken)' -f $eintraege.Count) }
     foreach ($eintrag in $eintraege) {
@@ -2535,6 +2587,7 @@ $script:Fenster = New-WolFenster @'
         <MenuItem x:Name="MnuDiagnose" Header="Diagnose"/>
         <MenuItem x:Name="MnuUpdOs" Header="OS"/>
         <MenuItem x:Name="MnuRdp" Header="RDP"/>
+        <MenuItem x:Name="MnuSsh" Header="SSH"/>
         <MenuItem x:Name="MnuUpdTreiber" Header="Treiber"/>
         <MenuItem x:Name="MnuWatoki" Header="WaToKi"/>
         <MenuItem x:Name="MnuWol" Header="WOL"/>
@@ -2600,6 +2653,7 @@ $script:Fenster = New-WolFenster @'
             </Style>
           </Button.Style>
         </Button>
+        <CheckBox x:Name="ChkTief" Content="Tiefer Scan (auch ARP-Tabelle)" VerticalAlignment="Center" Margin="0,2,18,8" ToolTip="Nimmt zusätzlich Geräte auf, die nicht auf Ping antworten, aber in der ARP-Tabelle dieses PCs stehen (nur im eigenen Subnetz). Beim Start immer aus."/>
         <TextBlock x:Name="TxtScan" Text="" Foreground="DarkOrange"/>
       </WrapPanel>
       <WrapPanel>
@@ -2629,6 +2683,7 @@ $script:Fenster = New-WolFenster @'
         <Button x:Name="BtnAlle" Content="Alle markieren"/>
         <Button x:Name="BtnKeine" Content="Keine markieren"/>
         <Button x:Name="BtnNurOnline" Content="Nur Online markieren"/>
+        <Button x:Name="BtnDetails" Content="Gerätedetails"/>
       </WrapPanel>
     </DockPanel>
 
@@ -2669,15 +2724,18 @@ $script:Fenster = New-WolFenster @'
 
     <TextBox x:Name="Log" Grid.Row="4" Margin="0,8,0,0" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
              TextWrapping="NoWrap" FontFamily="Consolas"/>
-    <TextBlock x:Name="TxtListe" Grid.Row="5" Margin="0,6,0,0" Foreground="DimGray"/>
+    <DockPanel Grid.Row="5" Margin="0,6,0,0" LastChildFill="True">
+      <TextBlock x:Name="TxtMarkiert" DockPanel.Dock="Right" Margin="12,0,0,0" Foreground="DimGray" Text="Markierte Geräte: 0"/>
+      <TextBlock x:Name="TxtListe" Foreground="DimGray"/>
+    </DockPanel>
   </Grid>
 </Window>
 '@
 
-foreach ($name in 'BtnAktuellesNetz', 'BtnAnderesNetz', 'TxtNetz', 'BtnScanStart', 'BtnScanStopp', 'TxtScan',
+foreach ($name in 'BtnAktuellesNetz', 'BtnAnderesNetz', 'TxtNetz', 'BtnScanStart', 'BtnScanStopp', 'ChkTief', 'TxtScan',
     'BtnFilterLoeschen', 'CmbAnzeige', 'MnuSpalten',
-    'BtnAlle', 'BtnKeine', 'BtnNurOnline', 'BtnBeenden',
-    'Gitter', 'Log', 'TxtListe') {
+    'BtnAlle', 'BtnKeine', 'BtnNurOnline', 'BtnDetails', 'BtnBeenden',
+    'Gitter', 'Log', 'TxtListe', 'TxtMarkiert') {
     $script:C[$name] = $script:Fenster.FindName($name)
 }
 $script:C.Gitter.ItemsSource = $script:Ansicht
@@ -2952,7 +3010,7 @@ function Start-WolScan {
     $script:ScanInfo = $ziel.Bereiche
     $adressen = $ziel.Adressen
     $drossel = 64
-    $script:ScanJob = Start-ThreadJob -ScriptBlock $script:ScanBlock -ArgumentList $adressen, $drossel, $script:OuiPfad
+    $script:ScanJob = Start-ThreadJob -ScriptBlock $script:ScanBlock -ArgumentList $adressen, $drossel, $script:OuiPfad, ([bool]$script:C.ChkTief.IsChecked)
     Update-WolScanAnzeige
     if (-not $script:ScanStill) { Write-WolLog "Scan gestartet: $($script:NetzCidr) ($($adressen.Count) Adressen)" }
 }
@@ -2986,8 +3044,15 @@ function Merge-WolErgebnis {
         if ($f.MAC) {
             ### Die MAC-Adresse ist ausschlaggebend
             $zeile = $script:Zeilen | Where-Object { $_.MAC -eq $f.MAC } | Select-Object -First 1
-            foreach ($a in @($script:Zeilen | Where-Object { $_ -ne $zeile -and $_.IP -eq $f.IP })) {
-                if ([string]::IsNullOrEmpty($a.MAC)) {
+            $gleicheIp = @($script:Zeilen | Where-Object { $_ -ne $zeile -and $_.IP -eq $f.IP })
+            ### Mehrere Zeilen ohne MAC auf derselben IP (zum Beispiel mehrere OU-Namen mit gleichem DNS-Eintrag): nur die Zeile mit passendem Hostnamen gehört zum antwortenden Gerät
+            $ohneMac = @($gleicheIp | Where-Object { [string]::IsNullOrEmpty($_.MAC) })
+            $treffer = $null
+            $antwortName = ([string]$(if ($zeile -and $zeile.Hostname) { $zeile.Hostname } else { $f.Hostname })).Split('.')[0].ToLower()
+            if ($antwortName) { $treffer = $ohneMac | Where-Object { ([string]$_.Hostname).Split('.')[0].ToLower() -eq $antwortName } | Select-Object -First 1 }
+            if (-not $treffer -and $ohneMac.Count -eq 1) { $treffer = $ohneMac[0] }
+            foreach ($a in $gleicheIp) {
+                if ([string]::IsNullOrEmpty($a.MAC) -and $a -eq $treffer) {
                     ### Zeile ohne MAC auf dieser IP (zum Beispiel aus der OU): mit der MAC-Zeile zusammenführen oder deren MAC erhalten
                     if (-not $zeile) { $zeile = $a; continue }
                     if (-not $zeile.Hostname) { $zeile.Hostname = $a.Hostname }
@@ -3000,7 +3065,7 @@ function Merge-WolErgebnis {
                     $script:Geaendert = $true
                 }
                 else {
-                    ### Zeile mit anderer MAC auf dieser IP: die IP ist veraltet
+                    ### Zeile mit anderer MAC oder anderem Hostnamen auf dieser IP: die IP ist veraltet, die Zeile bleibt erhalten
                     $a.IP = ''
                     $a.Ampel = 'Unbekannt'
                     $a.Status = 'IP veraltet (unter dieser IP antwortet ein anderes Gerät)'
@@ -3029,7 +3094,14 @@ function Merge-WolErgebnis {
         if ($neu) { $zeile.ZuletztGesehen = $jetzt }
         $nachher = '{0}|{1}|{2}|{3}|{4}' -f $zeile.IP, $zeile.MAC, $zeile.Hostname, $zeile.Hersteller, $zeile.Subnetz
         if ($neu -or $vorher -ne $nachher) { $script:Geaendert = $true }
-        if ($neu -or $zeile.Status -like 'IP veraltet*') {
+        if ($f.Stumm) {
+            if ($neu -or $zeile.Status -match '^(Noch nicht geprüft|Offline|IP veraltet|nur ARP)') {
+                $zeile.Ampel = 'Unbekannt'
+                $zeile.Status = 'nur ARP (antwortet nicht auf Ping)'
+                $zeile.ZuletztGesehen = $jetzt
+            }
+        }
+        elseif ($neu -or $zeile.Status -like 'IP veraltet*') {
             if ($f.WinRM) { $zeile.Ampel = 'Gruen'; $zeile.Status = 'Online (WinRM erreichbar)' }
             else { $zeile.Ampel = 'Gelb'; $zeile.Status = 'Online (kein WinRM)' }
         }
@@ -4776,6 +4848,10 @@ $script:DnsFertig = {
             if ($ip) { $z.IP = $ip; $z.Status = 'Noch nicht geprüft' }
             else { $z.Status = 'Keine IP-Adresse gefunden (DNS)' }
         }
+        foreach ($gruppe in @($a.Daten.Zeilen | Where-Object { $_.IP } | Group-Object IP | Where-Object { $_.Count -gt 1 })) {
+            foreach ($z in $gruppe.Group) { $z.Status = 'IP doppelt (mehrere Namen zeigen im DNS auf diese IP)' }
+            Write-WolLog "OU: IP $($gruppe.Name) wird von $($gruppe.Count) Namen im DNS geteilt: $((@($gruppe.Group | ForEach-Object { $_.Hostname })) -join ', ')"
+        }
         Write-WolLog "OU: Namensauflösung fertig ($(@($karte.Values | Where-Object { $_ }).Count) von $($karte.Count) aufgelöst)"
     }
     catch { Write-WolLog "Fehler bei der Namensauflösung: $($_.Exception.Message)" }
@@ -5286,7 +5362,10 @@ $script:PollTimer.Add_Tick({
         try {
             $erg = @(Receive-Job -Job $job -ErrorAction Stop) | Select-Object -Last 1
             Merge-WolErgebnis -Ergebnis $erg -Info $script:ScanInfo
-            if (-not $script:ScanStill) { Write-WolLog "Scan fertig: $($erg.Gefunden.Count) Geräte antworten" }
+            if (-not $script:ScanStill) {
+                $nurArp = @($erg.Gefunden | Where-Object { $_.Stumm }).Count
+                Write-WolLog "Scan fertig: $($erg.Gefunden.Count - $nurArp) Geräte antworten$(if ($script:C.ChkTief.IsChecked) { ", Tiefer Scan: $nurArp zusätzlich nur per ARP gefunden" })"
+            }
             if ($erg.OuiFehler) { Write-WolLog "Hersteller-Liste: $($erg.OuiFehler)" }
             Save-WolAuto
         }
@@ -5306,10 +5385,11 @@ $script:PollTimer.Add_Tick({
                 if (-not $z.IP) { continue }
                 $e = $karte[$z.IP]
                 if (-not $e) { continue }
+                if ($z.Status -like 'nur ARP*' -and -not $e.Online) { continue }
                 if ($e.WinRM) { $z.Ampel = 'Gruen'; $text = 'Online (WinRM erreichbar)' }
                 elseif ($e.Online) { $z.Ampel = 'Gelb'; $text = 'Online (kein WinRM)' }
                 else { $z.Ampel = 'Rot'; $text = 'Offline' }
-                if ($z.Status -match '^(Noch nicht geprüft|Online|Offline)') { $z.Status = $text }
+                if ($z.Status -match '^(Noch nicht geprüft|Online|Offline|nur ARP)') { $z.Status = $text }
                 if ($e.Online) { $z.ZuletztGesehen = $jetzt }
             }
             Update-WolAnsicht
@@ -5339,6 +5419,7 @@ $script:PollTimer.Add_Tick({
             if ($erg.Abgebrochen) { $p.Zeile.Ports = 'Portscan abgebrochen' }
             elseif (@($erg.Offen).Count -eq 0) { $p.Zeile.Ports = "keine offen ($($p.Bereich))" }
             else { $p.Zeile.Ports = Format-WolPorts -Ports ([int[]]@($erg.Offen)) }
+            Save-WolPortsWert -Zeile $p.Zeile
             Write-WolLog "Portscan fertig: $($p.Zeile.IP) - $($p.Zeile.Ports)"
         }
         catch { $p.Zeile.Ports = "Fehler: $($_.Exception.Message)" }
@@ -5423,6 +5504,7 @@ $script:MenueAktionen = [ordered]@{
     MnuDiagnose          = { Open-WolModul -Key 'DIAGNOSE' }
     MnuWatoki            = { Open-WolModul -Key 'WATOKI' }
     MnuRdp               = { Open-WolModul -Key 'RDP' }
+    MnuSsh               = { Open-WolModul -Key 'SSH' }
     MnuWol               = { Open-WolModul -Key 'WOL' }
     MnuPortscan          = { Start-WolPortscan }
     MnuPortscanAbbrechen = { Stop-WolPortscan }
@@ -5454,6 +5536,12 @@ $script:C.BtnBeenden.Add_Click({ $script:Fenster.Close() })
 
 $script:C.BtnAlle.Add_Click({ $script:C.Gitter.SelectAll() })
 $script:C.BtnKeine.Add_Click({ $script:C.Gitter.UnselectAll() })
+$script:C.Gitter.Add_SelectionChanged({ $script:C.TxtMarkiert.Text = 'Markierte Geräte: ' + @(Get-WolMarkierte).Count })
+$script:C.BtnDetails.Add_Click({
+    $zeile = $script:C.Gitter.SelectedItem
+    if ($zeile -is [NetCockpitZeile]) { Show-WolDetails -Zeile $zeile }
+    else { [void][System.Windows.MessageBox]::Show('Bitte zuerst ein Gerät in der Tabelle markieren.', 'NET-COCKPIT', 'OK', 'Information') }
+})
 $script:C.BtnNurOnline.Add_Click({
     $script:C.Gitter.UnselectAll()
     foreach ($z in @($script:Ansicht)) {
