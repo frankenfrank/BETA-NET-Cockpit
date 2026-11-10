@@ -1888,7 +1888,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Menüleiste:** Datei, Aktionen, Module, Werkzeuge, Ansicht, Optionen und Hilfe.' }
         @{ T = 'i'; X = '**Scan-Bereich:** Netzauswahl und die Knöpfe "Scan starten" und "Scan stoppen".' }
         @{ T = 'i'; X = '**Tabelle:** alle Geräte, unter jeder Spaltenüberschrift ein Filterfeld. **Log** und die Anzeige der Geräteliste stehen darunter.' }
-        @{ T = 'i'; X = '**Statusleiste unten:** rechts steht "Markierte Geräte: Zahl" (Anzahl der markierten Zeilen der angezeigten Tabelle).' }
+        @{ T = 'i'; X = '**Statusleiste unten:** rechts steht "Markierte Geräte: Zahl" (Anzahl der markierten Zeilen).' }
     ) })
 
     $inhalt.Add(@{ Titel = 'Scan & Status'; Bloecke = @(
@@ -1907,7 +1907,7 @@ function Get-WolInfoInhalt {
 
     $inhalt.Add(@{ Titel = 'Tabelle'; Bloecke = @(
         @{ T = 'h'; X = 'Filter und Anzeige' }
-        @{ T = 'i'; X = '**Spaltenfilter:** Das Feld unter der Überschrift filtert diese Spalte nach Teiltext (Groß-/Kleinschreibung egal). Mehrere Filter gelten gleichzeitig. Ein Sternchen (*) steht für beliebig viele, ein Fragezeichen (?) für genau ein Zeichen. Nur * zeigt alle Zeilen mit Inhalt in der Spalte, nur ! alle mit leerer Spalte. **Ausschluss:** ein Ausrufezeichen vor dem Text zeigt alles, was den Text nicht enthält (zum Beispiel !2012 in der Bemerkung; Zeilen mit leerer Spalte bleiben sichtbar). Platzhalter gehen auch dort.' }
+        @{ T = 'i'; X = '**Spaltenfilter:** Das Feld unter der Überschrift filtert diese Spalte nach Teiltext (Groß-/Kleinschreibung egal). Die Tabelle filtert, wenn du kurz (etwa 0,3 Sekunden) nicht mehr tippst, nicht bei jedem Zeichen. Mehrere Filter gelten gleichzeitig. Ein Sternchen (*) steht für beliebig viele, ein Fragezeichen (?) für genau ein Zeichen. Nur * zeigt alle Zeilen mit Inhalt in der Spalte, nur ! alle mit leerer Spalte. **Ausschluss:** ein Ausrufezeichen vor dem Text zeigt alles, was den Text nicht enthält (zum Beispiel !2012 in der Bemerkung; Zeilen mit leerer Spalte bleiben sichtbar). Platzhalter gehen auch dort.' }
         @{ T = 'i'; X = '**Waagerecht scrollen:** sind mehr Spalten eingeblendet, als ins Fenster passen, erscheint unten ein Scrollbalken; die Spalten behalten ihre Breite (Spaltenbreite per Ziehen an der Überschrift änderbar).' }
         @{ T = 'i'; X = '**Gespeicherte Werte:** was die Module (OS, APP, Treiber, WOL) über ein Gerät auslesen, bleibt erhalten und steht nach dem Laden der Liste sofort wieder in den Spalten: Windows-Version, WinGet-Modul und -Version, WAU, Update-Modul, PC-Hersteller, Modell, Treiber-Tool und die WOL-Werte. Zugeordnet wird über die MAC-Adresse, sonst über die IP. Die Spalte **Werte gelesen am** (standardmäßig ausgeblendet) zeigt, wann zuletzt gelesen wurde. Nicht gespeichert werden Letzter Neustart, Neustart ausstehend und die Anzahl der Updates, weil sich diese Werte laufend ändern. Ein neues "Status prüfen" überschreibt die gespeicherten Werte.' }
         @{ T = 'i'; X = '**Filter löschen:** leert alle Filterfelder. **Anzeigen:** Alle (auch grau = noch nicht geprüft), Nur WinRM (grün), Online Geräte (grün und gelb) oder Offlinegeräte (rot). Bei den letzten drei sind graue Geräte ausgeblendet. Gilt für Anzeige, Markieren und Export und wird gespeichert.' }
@@ -2765,6 +2765,14 @@ $script:Ansicht.Filter = [System.Predicate[object]]{
     return $true
 }
 
+## Filter mit Verzögerung: die Tabelle wird erst gefiltert, wenn kurz nicht mehr getippt wird (bei großen Netzen sonst bei jedem Zeichen)
+$script:FilterTimer = [System.Windows.Threading.DispatcherTimer]::new()
+$script:FilterTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+$script:FilterTimer.Add_Tick({
+    $script:FilterTimer.Stop()
+    Update-WolAnsicht -Bestaetigen
+})
+
 ## Nächsten Vorfahren eines bestimmten Typs im visuellen (sonst logischen) Baum suchen
 function Get-WolVorfahre {
     param($Start, [type]$Typ)
@@ -2806,7 +2814,8 @@ function New-WolSpalte {
     $box.ToolTip = "Filter für die Spalte $Titel (Teiltext, Groß-/Kleinschreibung egal; * und ? als Platzhalter; nur * = nicht leer, nur ! = leer, !Text = alles ohne diesen Text)"
     $box.Add_TextChanged({
         $script:SpaltenFilter[$this.Tag] = $this.Text
-        Update-WolAnsicht -Bestaetigen
+        $script:FilterTimer.Stop()
+        $script:FilterTimer.Start()
     })
     [void]$kopf.Children.Add($beschriftung)
     [void]$kopf.Children.Add($box)
@@ -5536,7 +5545,7 @@ $script:C.BtnBeenden.Add_Click({ $script:Fenster.Close() })
 
 $script:C.BtnAlle.Add_Click({ $script:C.Gitter.SelectAll() })
 $script:C.BtnKeine.Add_Click({ $script:C.Gitter.UnselectAll() })
-$script:C.Gitter.Add_SelectionChanged({ $script:C.TxtMarkiert.Text = 'Markierte Geräte: ' + @(Get-WolMarkierte).Count })
+$script:C.Gitter.Add_SelectionChanged({ $script:C.TxtMarkiert.Text = 'Markierte Geräte: ' + $script:C.Gitter.SelectedItems.Count })
 $script:C.BtnDetails.Add_Click({
     $zeile = $script:C.Gitter.SelectedItem
     if ($zeile -is [NetCockpitZeile]) { Show-WolDetails -Zeile $zeile }
