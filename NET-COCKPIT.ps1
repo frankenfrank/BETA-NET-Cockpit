@@ -9,7 +9,7 @@
     - Scannt ein Netz per Ping, liest MAC-Adressen aus der ARP-Tabelle und Hersteller aus der IEEE-OUI-Liste
     - Liest die Computer einer OU aus dem Active Directory (LDAP, kein RSAT nötig)
     - Geräteliste als Semikolon-getrennte Textdatei; Speichern ohne bekannte Datei fragt nach Name und Ort, Auto-Speichern schreibt nur in die zuletzt geöffnete oder gespeicherte Datei
-    - Datenordner C:\Temp\NET-COCKPIT_data: Logdatei, Herstellerliste, Einstellungen (Optionen und Spalten), die von den Modulen ausgelesenen Werte (NET-COCKPIT-werte.json) und pro Gerät die ausgelesenen KuDo-Informationen (Unterordner Geraeteinfos); Optionen > "NET-COCKPIT Daten löschen..." entfernt alles
+    - Datenordner C:\Temp\NET-COCKPIT_data: Logdatei, Herstellerliste, Einstellungen (Optionen und Spalten), die von den Modulen ausgelesenen Werte (NET-COCKPIT-werte.json) und pro Gerät die ausgelesenen KuDo-Informationen und die gespeicherten Listen der Module OS, APP und Treiber (Unterordner Geraeteinfos); Optionen > "NET-COCKPIT Daten löschen..." entfernt alles
     - Neustart, Neustart planen (Aufgabe auf dem Zielgerät), Neustart abbrechen und Herunterfahren per WinRM
     - Aufträge an mehrere Geräte laufen in einer Warteschlange; die Parallelität (Standard 10) ist in den Optionen einstellbar
     - Ampel: Grün = Ping + WinRM (Port 5985), Gelb = nur Ping, Rot = offline
@@ -1909,12 +1909,12 @@ function Get-WolInfoInhalt {
         @{ T = 'h'; X = 'Filter und Anzeige' }
         @{ T = 'i'; X = '**Spaltenfilter:** Das Feld unter der Überschrift filtert diese Spalte nach Teiltext (Groß-/Kleinschreibung egal). Die Tabelle filtert, wenn du kurz (etwa 0,3 Sekunden) nicht mehr tippst, nicht bei jedem Zeichen. Mehrere Filter gelten gleichzeitig. Ein Sternchen (*) steht für beliebig viele, ein Fragezeichen (?) für genau ein Zeichen. Nur * zeigt alle Zeilen mit Inhalt in der Spalte, nur ! alle mit leerer Spalte. **Ausschluss:** ein Ausrufezeichen vor dem Text zeigt alles, was den Text nicht enthält (zum Beispiel !2012 in der Bemerkung; Zeilen mit leerer Spalte bleiben sichtbar). Platzhalter gehen auch dort.' }
         @{ T = 'i'; X = '**Waagerecht scrollen:** sind mehr Spalten eingeblendet, als ins Fenster passen, erscheint unten ein Scrollbalken; die Spalten behalten ihre Breite (Spaltenbreite per Ziehen an der Überschrift änderbar).' }
-        @{ T = 'i'; X = '**Gespeicherte Werte:** was die Module (OS, APP, Treiber, WOL) über ein Gerät auslesen, bleibt erhalten und steht nach dem Laden der Liste sofort wieder in den Spalten: Windows-Version, WinGet-Modul und -Version, WAU, Update-Modul, PC-Hersteller, Modell, Treiber-Tool und die WOL-Werte. Zugeordnet wird über die MAC-Adresse, sonst über die IP. Die Spalte **Werte gelesen am** (standardmäßig ausgeblendet) zeigt, wann zuletzt gelesen wurde. Nicht gespeichert werden Letzter Neustart, Neustart ausstehend und die Anzahl der Updates, weil sich diese Werte laufend ändern. Ein neues "Status prüfen" überschreibt die gespeicherten Werte.' }
+        @{ T = 'i'; X = '**Gespeicherte Werte:** was die Module (OS, APP, Treiber, WOL) über ein Gerät auslesen, bleibt erhalten und steht nach dem Laden der Liste sofort wieder in den Spalten: Windows-Version, WinGet-Modul und -Version, WAU, Update-Modul, PC-Hersteller, Modell, Treiber-Tool und die WOL-Werte. Zugeordnet wird über die MAC-Adresse, sonst über die IP. Die Spalte **Werte gelesen am** (standardmäßig ausgeblendet) zeigt, wann zuletzt gelesen wurde. Die Spalte **Windows** (Windows-Version) ist standardmäßig ausgeblendet und lässt sich unter Spalten immer einblenden, auch ohne geöffnetes Modul. Nicht gespeichert werden Letzter Neustart, Neustart ausstehend und die Anzahl der Updates, weil sich diese Werte laufend ändern. Ein neues "Status prüfen" überschreibt die gespeicherten Werte. Die Listen selbst (verfügbare Updates, Verlauf, Treiber, installierte Programme) liegen im Ordner des Geräts (Geraeteinfos) und werden in den Detailfenstern mit "gelesen am" angezeigt; sie können veraltet sein, auch wenn sie erst einen Tag alt sind.' }
         @{ T = 'i'; X = '**Filter löschen:** leert alle Filterfelder. **Anzeigen:** Alle (auch grau = noch nicht geprüft), Nur WinRM (grün), Online Geräte (grün und gelb) oder Offlinegeräte (rot). Bei den letzten drei sind graue Geräte ausgeblendet. Gilt für Anzeige, Markieren und Export und wird gespeichert.' }
         @{ T = 'i'; X = '**Sortieren:** per Klick auf den Spaltennamen. Beim Start nach IP in Zahlenreihenfolge.' }
         @{ T = 'h'; X = 'Spalten ein- und ausblenden' }
         @{ T = 'i'; X = '**Rechtsklick auf eine Spaltenüberschrift** (auf den Namen, nicht auf das Filterfeld) oder **Ansicht > Spalten:** Haken setzen oder entfernen. Die Auswahl wird gespeichert (Spalten der Module ausgenommen). Beim Ausblenden wird der Filter dieser Spalte geleert.' }
-        @{ T = 'i'; X = '**Spalten der Module** (zum Beispiel Windows-Version oder Neustart ausstehend) sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und werden beim Schließen des Fensters wieder ausgeblendet. Die Werte bleiben in den Zeilen erhalten. Sie werden nicht gespeichert; Ausnahme ist die Spalte **Wartungsreihenfolge** des Moduls WaToKi, sie wird mit der Geräteliste gespeichert.' }
+        @{ T = 'i'; X = '**Spalten der Module** (zum Beispiel Neustart ausstehend) sind nur sichtbar, wenn im Modulfenster der Haken **Spalten des Moduls in der Tabelle anzeigen** gesetzt ist (beim Öffnen immer aus), und werden beim Schließen des Fensters wieder ausgeblendet. Die Werte bleiben in den Zeilen erhalten. Sie werden nicht gespeichert; Ausnahme ist die Spalte **Wartungsreihenfolge** des Moduls WaToKi, sie wird mit der Geräteliste gespeichert.' }
         @{ T = 'h'; X = 'Markieren und Bearbeiten' }
         @{ T = 'i'; X = '**Alle / Keine / Nur Online markieren** stehen über der Tabelle, **Markierte aus Liste entfernen** im Menü Werkzeuge.' }
         @{ T = 'i'; X = '**Hostname, Typ, MAC und Bemerkung** lassen sich direkt in der Tabelle bearbeiten (Doppelklick in die Zelle), bei geöffnetem Modul WaToKi auch die **Wartungsreihenfolge**.' }
@@ -1937,7 +1937,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Auto-Speichern** (Optionen) schreibt nach Scan, Statusprüfung und Portscan, aber nur in die bekannte Datei. Ohne bekannte Datei bleibt es still, im Log steht ein Hinweis.' }
         @{ T = 'i'; X = 'Beim Beenden und beim Öffnen einer anderen Liste fragt das Cockpit bei ungespeicherten Änderungen nach; ohne bekannte Datei mit Dateidialog.' }
         @{ T = 'h'; X = 'Datenordner' }
-        @{ T = 'p'; X = 'Alles, was das Cockpit selbst ablegt, liegt in **C:\Temp\NET-COCKPIT_data** (wird beim Start angelegt): **NET-COCKPIT.log** (bei jedem Start geleert), **NET-COCKPIT-oui.csv** (Herstellerliste), **NET-COCKPIT-einstellungen.json** (Optionen und Spalten), **NET-COCKPIT-werte.json** (die von den Modulen ausgelesenen Werte je Gerät) und der Unterordner **Geraeteinfos** mit den KuDo-Informationen je Gerät. Die Ausgaben der Wartungsskripte (Modul WaToKi) liegen im Unterordner **Modul-WaToKi**.' }
+        @{ T = 'p'; X = 'Alles, was das Cockpit selbst ablegt, liegt in **C:\Temp\NET-COCKPIT_data** (wird beim Start angelegt): **NET-COCKPIT.log** (bei jedem Start geleert), **NET-COCKPIT-oui.csv** (Herstellerliste), **NET-COCKPIT-einstellungen.json** (Optionen und Spalten), **NET-COCKPIT-werte.json** (die von den Modulen ausgelesenen Werte je Gerät) und der Unterordner **Geraeteinfos** mit den KuDo-Informationen je Gerät. Darin liegt je Gerät ein Ordner mit den gespeicherten Listen der Module OS, APP und Treiber (Updates, Verlauf, installierte Programme, jeweils mit dem Zeitpunkt "gelesen am"). Die Ausgaben der Wartungsskripte (Modul WaToKi) liegen im Unterordner **Modul-WaToKi**.' }
         @{ T = 'i'; X = '**Optionen > NET-COCKPIT Daten löschen...:** löscht nach einer Rückfrage den ganzen Ordner und beendet das Cockpit. Listen an anderen Orten und Exporte bleiben. Lässt sich etwas nicht löschen (Datei gesperrt), bleibt das Cockpit offen und nennt die betroffenen Dateien. Der nächste Start ist ein normaler Erststart.' }
     ) })
 
@@ -2938,6 +2938,7 @@ foreach ($def in @(
     @{ Key = 'IP'; Titel = 'IP'; Eig = 'IP'; Sort = 'IpSort'; Breite = 110 }
     @{ Key = 'MAC'; Titel = 'MAC'; Eig = 'MAC'; Breite = 130; NurLesen = $false }
     @{ Key = 'Hersteller'; Titel = 'Hersteller'; Eig = 'Hersteller'; Breite = 160 }
+    @{ Key = 'Windows'; Titel = 'Windows'; Eig = '[Windows]'; Breite = 270; Sichtbar = $false }
     @{ Key = 'Subnetz'; Titel = 'Subnetz'; Eig = 'Subnetz'; Breite = 105 }
     @{ Key = 'ZuletztGesehen'; Titel = 'Zuletzt gesehen'; Eig = 'ZuletztGesehen'; Breite = 120 }
     @{ Key = 'WerteStand'; Titel = 'Werte gelesen am'; Eig = '[WerteStand]'; Breite = 120; Sichtbar = $false }
@@ -3428,6 +3429,58 @@ $script:BefehlFertig = {
     else { $b.Zeile.Status = 'Befehl mit Fehler beendet' }
     Write-WolLog "Befehl fertig: $name ($kopf)"
     if ((Get-WolGruppeOffen -Gruppe 'Befehl') -eq 0 -and $script:BefehlKnopf) { $script:BefehlKnopf.IsEnabled = $true }
+}
+
+# Gespeicherte Listen je Gerät
+## Datei einer gespeicherten Liste im Ordner des Geräts (Geraeteinfos\Gerätename\Name.json; Gerätename = Hostname ohne Domain, sonst IP-Adresse)
+function Get-WolGeraeteListePfad {
+    param($Zeile, [string]$Name)
+    $kudo = Get-WolKudoPfad -Zeile $Zeile
+    if (-not $kudo) { return $null }
+    return Join-Path (Join-Path (Split-Path -Path $kudo) ([System.IO.Path]::GetFileNameWithoutExtension($kudo))) ($Name + '.json')
+}
+
+## Liste im Ordner des Geräts speichern; gibt den Zeitstempel "gelesen am" (yyyy-MM-dd HH:mm) zurück
+function Save-WolGeraeteListe {
+    param($Zeile, [string]$Name, $Daten)
+    $stand = Get-Date -Format 'yyyy-MM-dd HH:mm'
+    try {
+        $pfad = Get-WolGeraeteListePfad -Zeile $Zeile -Name $Name
+        if (-not $pfad) { return $stand }
+        $ordner = Split-Path -Path $pfad
+        if (-not (Test-Path -LiteralPath $ordner)) { New-Item -Path $ordner -ItemType Directory -Force | Out-Null }
+        [ordered]@{ Stand = $stand; Daten = $Daten } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $pfad -Encoding utf8 -ErrorAction Stop
+    }
+    catch { Write-WolLog "Liste $Name konnte nicht gespeichert werden: $($_.Exception.Message)" }
+    return $stand
+}
+
+## Gespeicherte Liste lesen (Objekt mit Stand und Daten, $null wenn es keine gibt); Datumstexte bleiben Text
+function Read-WolGeraeteListe {
+    param($Zeile, [string]$Name)
+    $pfad = Get-WolGeraeteListePfad -Zeile $Zeile -Name $Name
+    if (-not $pfad -or -not (Test-Path -LiteralPath $pfad)) { return $null }
+    try {
+        $text = Get-Content -LiteralPath $pfad -Raw -Encoding utf8 -ErrorAction Stop
+        try { return ($text | ConvertFrom-Json -DateKind String -ErrorAction Stop) }
+        catch [System.Management.Automation.ParameterBindingException] { return ($text | ConvertFrom-Json -ErrorAction Stop) }
+    }
+    catch { return $null }
+}
+
+## Gespeicherte Liste löschen
+function Remove-WolGeraeteListe {
+    param($Zeile, [string]$Name)
+    $pfad = Get-WolGeraeteListePfad -Zeile $Zeile -Name $Name
+    if ($pfad -and (Test-Path -LiteralPath $pfad)) { Remove-Item -LiteralPath $pfad -Force -ErrorAction SilentlyContinue }
+}
+
+## Zeitstempel einer gespeicherten Liste für die Anzeige (dd.MM.yyyy HH:mm)
+function Format-WolStand {
+    param([string]$Stand)
+    if (-not $Stand) { return '' }
+    try { return [datetime]::ParseExact($Stand, 'yyyy-MM-dd HH:mm', [cultureinfo]::InvariantCulture).ToString('dd.MM.yyyy HH:mm') }
+    catch { return $Stand }
 }
 
 # KuDo-Informationen

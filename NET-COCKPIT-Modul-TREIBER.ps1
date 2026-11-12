@@ -766,6 +766,7 @@ $script:TrBlock = {
                     ### Verfügbare Treiber-Updates
                     $liste = @($res.Updates | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Id = [string]$_.Id; Typ = [string]$_.Typ; Version = [string]$_.Version } })
                     $S.Details = $liste
+                    $S.DetailsNeu = $true
                     $nichtInv = @($liste | Where-Object { $_.Typ -eq 'nicht inventarisiert' }).Count
                     $relevant = $liste.Count - $nichtInv
                     $S.Updates = if ($nichtInv -gt 0) { "$relevant (+$nichtInv)" } else { [string]$liste.Count }
@@ -920,6 +921,7 @@ $script:TrBlock = {
 
                     $S.Updates = '-'
                     $S.Details = @()
+                    $S.DetailsNeu = $true
 
                     if ($null -eq $ergebnis)  { $S.Status = 'Installation beendet, Ergebnis unbekannt' }
                     elseif ($ergebnis -eq 1)  { $S.Status = 'Installation beendet, mindestens ein Treiber fehlgeschlagen (siehe Log)' }
@@ -951,16 +953,30 @@ $script:TrBlock = {
 function script:Get-WolTrSync {
     param($Zeile)
     if (-not $script:TrSync.ContainsKey($Zeile)) {
-        $script:TrSync[$Zeile] = [hashtable]::Synchronized(@{
+        $S = [hashtable]::Synchronized(@{
             Status = ''; Fehlertext = ''; Verbunden = $false
             Windows = ''; Hersteller = ''; Modell = ''; Tool = ''; Updates = ''; Neustart = ''; LetzterNeustart = ''
             GeplantBis = ''; GeplantBisGelesen = $false
             Marker = $false; Inkompat = ''
             Details = @(); Verlauf = @(); ToolLog = @()
+            DetailsStand = ''; DetailsNeu = $false
             Log = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
         })
+        $script:TrSync[$Zeile] = $S
+        Restore-WolTrListen -Zeile $Zeile -S $S
     }
     return $script:TrSync[$Zeile]
+}
+
+## Gespeicherte Listen "Verfügbare Treiber", "Verlauf" und "Tool-Log" des Geräts laden (Ordner des Geräts, Datei Treiber.json; Stand = gelesen am)
+function script:Restore-WolTrListen {
+    param($Zeile, $S)
+    $gespeichert = Read-WolGeraeteListe -Zeile $Zeile -Name 'Treiber'
+    if (-not $gespeichert) { return }
+    $S.Details = @(@($gespeichert.Daten.Details) | Where-Object { $_ })
+    $S.Verlauf = @(@($gespeichert.Daten.Verlauf) | Where-Object { $_ })
+    $S.ToolLog = @(@($gespeichert.Daten.ToolLog) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
+    $S.DetailsStand = [string]$gespeichert.Stand
 }
 
 ## Werte aus dem Sync-Objekt in die Zeile übernehmen (nur Werte, die das Modul gelesen hat)
@@ -1010,6 +1026,10 @@ $script:TrFertig = {
     elseif (-not $S.Status) { $S.Status = 'Beendet' }
     Update-WolTrZeile -Zeile $z -S $S
     Save-WolWerteZeile -Zeile $z -Neu:($a.Daten.Aktion -eq 'Status' -and -not $S.Fehlertext)
+    if ($S.DetailsNeu) {
+        $S.DetailsNeu = $false
+        $S.DetailsStand = Save-WolGeraeteListe -Zeile $z -Name 'Treiber' -Daten ([ordered]@{ Details = @($S.Details); Verlauf = @($S.Verlauf); ToolLog = @($S.ToolLog) })
+    }
     $z.Status = [string]$S.Status
     Write-WolLog ('TREIBER {0}: {1}' -f $a.Daten.Name, $S.Status)
 
@@ -1119,7 +1139,8 @@ function script:Show-WolTrDetails {
   </Grid>
 </Window>
 '@
-    $f.Title = "Treiber auf $name"
+    $stand = Format-WolStand $S.DetailsStand
+    $f.Title = "Treiber auf $name" + $(if ($stand) { " (gelesen am $stand)" } else { '' })
     $f.Owner = $script:Fenster
     $f.FindName('TabelleVerfuegbar').ItemsSource = $verfuegbar
     $f.FindName('TabelleVerlauf').ItemsSource = $verlauf
@@ -1160,7 +1181,7 @@ function script:Start-WolTrInstallieren {
     foreach ($z in $ziele) {
         $d = @(@((Get-WolTrSync -Zeile $z).Details) | Where-Object { $_ })
         $ni = @($d | Where-Object { $_.Typ -eq 'nicht inventarisiert' }).Count
-        if ($ni -gt 0) { $hinweis += "$(Get-WolTrNamen -Zeilen @($z)): $($d.Count - $ni) inventarisiert, $ni nicht inventarisiert" }
+        if ($ni -gt 0) { $hinweis += "$(Get-WolTrNamen -Zeilen @($z)): $($d.Count - $ni) inventarisiert, $ni nicht inventarisiert (gelesen am $(Format-WolStand (Get-WolTrSync -Zeile $z).DetailsStand))" }
     }
     if ($hinweis.Count -gt 0) {
         $text = $text.Replace("`r`n`r`nWeiter?", "`r`n`r`nLaut letztem Status:`r`n" + ($hinweis -join "`r`n") + "`r`nDell Command | Update lässt sich nicht auf einzelne Pakete beschränken, nur auf Typen (Treiber, BIOS, Firmware).`r`n`r`nWeiter?")

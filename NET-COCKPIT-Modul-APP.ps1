@@ -491,6 +491,7 @@ $script:AppBlock = {
                 ### Verfügbare Programm-Updates
                 $liste = @($res.Updates | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Id = [string]$_.Id; Version = [string]$_.Version; Verfuegbar = [string]$_.Verfuegbar; Quelle = [string]$_.Quelle } })
                 $S.Details = $liste
+                $S.DetailsNeu = $true
                 $S.Updates = [string]$liste.Count
                 foreach ($u in $liste) { Write-Log ("{0} | {1} | {2} -> {3}" -f $u.Name, $u.Id, $u.Version, $u.Verfuegbar) }
 
@@ -525,6 +526,7 @@ $script:AppBlock = {
                 if (-not $res) { return }
 
                 $S.Programme = @(@($res.Programme) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Id = [string]$_.Id; Version = [string]$_.Version; Quelle = [string]$_.Quelle } })
+                $S.ProgrammeNeu = $true
                 $S.Status = "{0} installierte Programme gelesen" -f @($S.Programme).Count
                 Write-Log $S.Status
             }
@@ -660,6 +662,7 @@ try { Repair-WinGetPackageManager -AllUsers | Out-Null } catch { Write-Output ('
                     if ($Aktion -ne 'WauInstallieren') {
                         $S.Updates = '-'
                         $S.Details = @()
+                        $S.DetailsNeu = $true
                     }
 
                     if ($null -eq $ergebnis) { $S.Status = "$wort beendet, Ergebnis unbekannt" }
@@ -696,16 +699,41 @@ try { Repair-WinGetPackageManager -AllUsers | Out-Null } catch { Write-Output ('
 function script:Get-WolAppSync {
     param($Zeile)
     if (-not $script:AppSync.ContainsKey($Zeile)) {
-        $script:AppSync[$Zeile] = [hashtable]::Synchronized(@{
+        $S = [hashtable]::Synchronized(@{
             Status = ''; Fehlertext = ''; Verbunden = $false; NeustartGemeldet = $false
             Windows = ''; Modul = ''; Updates = ''; Winget = ''; Neustart = ''; LetzterNeustart = ''
             GeplantBis = ''; GeplantBisGelesen = $false
             Wau = ''; WauListe = ''; WauGelesen = $false
             Details = @(); Verlauf = @(); WauVerlauf = @(); Programme = @()
+            DetailsStand = ''; DetailsNeu = $false; ProgrammeStand = ''; ProgrammeNeu = $false
             Log = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
         })
+        $script:AppSync[$Zeile] = $S
+        Restore-WolAppProgramme -Zeile $Zeile -S $S
+        Restore-WolAppUpdates -Zeile $Zeile -S $S
     }
     return $script:AppSync[$Zeile]
+}
+
+## Gespeicherte Programmliste des Geräts laden (Ordner des Geräts, Datei APP-Programme.json; Stand = gelesen am)
+function script:Restore-WolAppProgramme {
+    param($Zeile, $S)
+    $gespeichert = Read-WolGeraeteListe -Zeile $Zeile -Name 'APP-Programme'
+    if (-not $gespeichert) { return }
+    $S.Programme = @(@($gespeichert.Daten) | Where-Object { $_ })
+    $S.ProgrammeStand = [string]$gespeichert.Stand
+}
+
+## Gespeicherte Listen "Verfügbare Updates", "Cockpit-Verlauf" und "WAU-Verlauf" des Geräts laden (Datei APP-Updates.json)
+function script:Restore-WolAppUpdates {
+    param($Zeile, $S)
+    $gespeichert = Read-WolGeraeteListe -Zeile $Zeile -Name 'APP-Updates'
+    if (-not $gespeichert) { return }
+    $S.Details = @(@($gespeichert.Daten.Details) | Where-Object { $_ })
+    $S.Verlauf = @(@($gespeichert.Daten.Verlauf) | Where-Object { $_ })
+    $S.WauVerlauf = @(@($gespeichert.Daten.WauVerlauf) | Where-Object { $_ })
+    $S.DetailsStand = [string]$gespeichert.Stand
+    if ($S.Updates -eq '') { $S.Updates = [string]@($S.Details).Count }
 }
 
 ## Werte aus dem Sync-Objekt in die Zeile übernehmen (nur Werte, die das Modul gelesen hat)
@@ -783,6 +811,27 @@ $script:AppFertig = {
     elseif (-not $S.Status) { $S.Status = 'Beendet' }
     Update-WolAppZeile -Zeile $z -S $S
     Save-WolWerteZeile -Zeile $z -Neu:($aktion -eq 'Status' -and -not $S.Fehlertext)
+
+    ### Neu gelesene Listen im Ordner des Geräts speichern (mit Zeitpunkt "gelesen am")
+    $programmeNeu = $false
+    if ($S.DetailsNeu) {
+        $S.DetailsNeu = $false
+        $S.DetailsStand = Save-WolGeraeteListe -Zeile $z -Name 'APP-Updates' -Daten ([ordered]@{ Details = @($S.Details); Verlauf = @($S.Verlauf); WauVerlauf = @($S.WauVerlauf) })
+    }
+    if ($aktion -in 'ProgrammeLesen', 'ProgrammeAnzeigen') {
+        if ($S.ProgrammeNeu) {
+            $S.ProgrammeNeu = $false
+            $programmeNeu = $true
+            $S.ProgrammeStand = Save-WolGeraeteListe -Zeile $z -Name 'APP-Programme' -Daten @($S.Programme)
+        }
+        else { Restore-WolAppProgramme -Zeile $z -S $S }
+    }
+    ### Nach einer Deinstallation ist die gespeicherte Programmliste überholt
+    if ($aktion -eq 'ProgrammDeinstallieren' -and -not $S.Fehlertext) {
+        Remove-WolGeraeteListe -Zeile $z -Name 'APP-Programme'
+        $S.Programme = @()
+        $S.ProgrammeStand = ''
+    }
     $z.Status = [string]$S.Status
     Write-WolLog ("APP {0}: {1}" -f $a.Daten.Name, $S.Status)
 
@@ -811,7 +860,7 @@ $script:AppFertig = {
         }
     }
 
-    if ($aktion -eq 'ProgrammeLesen' -and -not $S.Fehlertext -and @($S.Programme).Count -gt 0) {
+    if ($aktion -eq 'ProgrammeLesen' -and $programmeNeu -and -not $S.Fehlertext -and @($S.Programme).Count -gt 0) {
         $script:AppDeinstallWarten.Add($z)
         if (-not $script:AppTimer.IsEnabled) { $script:AppTimer.Start() }
     }
@@ -967,10 +1016,12 @@ function script:Show-WolAppProgrammListe {
     $ohneDaten = [System.Collections.Generic.List[string]]::new()
     foreach ($z in @($Lauf.Zeilen)) {
         $geraet = Get-WolAppNamen -Zeilen @($z)
-        $programme = @((Get-WolAppSync -Zeile $z).Programme)
+        $sz = Get-WolAppSync -Zeile $z
+        $programme = @($sz.Programme)
         if ($programme.Count -eq 0) { $ohneDaten.Add($geraet); continue }
+        $gelesen = Format-WolStand $sz.ProgrammeStand
         foreach ($p in $programme) {
-            $eintraege.Add([pscustomobject]@{ Geraet = $geraet; Name = [string]$p.Name; Id = [string]$p.Id; Version = [string]$p.Version; Quelle = [string]$p.Quelle })
+            $eintraege.Add([pscustomobject]@{ Geraet = $geraet; Name = [string]$p.Name; Id = [string]$p.Id; Version = [string]$p.Version; Quelle = [string]$p.Quelle; Gelesen = $gelesen })
         }
     }
     if ($eintraege.Count -eq 0) {
@@ -1003,9 +1054,11 @@ function script:Show-WolAppProgrammListe {
         <DataGridTextColumn Header="Id"      Binding="{Binding Id, Mode=OneWay}"      Width="*"/>
         <DataGridTextColumn Header="Version" Binding="{Binding Version, Mode=OneWay}" Width="130"/>
         <DataGridTextColumn Header="Quelle"  Binding="{Binding Quelle, Mode=OneWay}"  Width="80"/>
+        <DataGridTextColumn Header="Gelesen am" Binding="{Binding Gelesen, Mode=OneWay}" Width="120"/>
       </DataGrid.Columns>
     </DataGrid>
     <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+      <Button x:Name="BtnNeu" Content="Neu auslesen" Padding="14,4" Margin="0,0,8,0" ToolTip="Liest die Programme der Geräte in dieser Liste neu aus (nur grüne Geräte) und öffnet die Liste danach erneut"/>
       <Button x:Name="BtnExport" Content="Exportieren (CSV)..." Padding="14,4" Margin="0,0,8,0" ToolTip="Schreibt die aktuell angezeigten Zeilen in eine CSV-Datei (Semikolon, für Excel)"/>
       <Button x:Name="BtnSchliessen" Content="Schließen" Padding="14,4" IsCancel="True"/>
     </StackPanel>
@@ -1020,6 +1073,7 @@ function script:Show-WolAppProgrammListe {
     $gesamt = $eintraege.Count
     $anzahlGeraete = @($eintraege | Select-Object -ExpandProperty Geraet -Unique).Count
     $startOrdner = $(if ($script:ListenPfad) { Split-Path -Path $script:ListenPfad } else { $script:DatenOrdner })
+    $geraeteZeilen = @($Lauf.Zeilen)
 
     $raster.ItemsSource = $eintraege
     $ansicht = [System.Windows.Data.CollectionViewSource]::GetDefaultView($raster.ItemsSource)
@@ -1050,13 +1104,14 @@ function script:Show-WolAppProgrammListe {
         if ($dlg.ShowDialog($f) -ne $true) { return }
         try {
             $zeilen = @($ansicht)
-            $zeilen | Select-Object @{ Name = 'Gerät'; Expression = { $_.Geraet } }, Name, Id, Version, Quelle | Export-Csv -Path $dlg.FileName -Delimiter ';' -NoTypeInformation -Encoding utf8BOM
+            $zeilen | Select-Object @{ Name = 'Gerät'; Expression = { $_.Geraet } }, Name, Id, Version, Quelle, @{ Name = 'Gelesen am'; Expression = { $_.Gelesen } } | Export-Csv -Path $dlg.FileName -Delimiter ';' -NoTypeInformation -Encoding utf8BOM
             [void][System.Windows.MessageBox]::Show($f, ("{0} Zeilen exportiert:`r`n{1}" -f $zeilen.Count, $dlg.FileName), 'Programmliste exportieren', 'OK', 'Information')
         }
         catch {
             [void][System.Windows.MessageBox]::Show($f, "Der Export ist fehlgeschlagen: $($_.Exception.Message)", 'Programmliste exportieren', 'OK', 'Warning')
         }
     }.GetNewClosure())
+    $f.FindName('BtnNeu').Add_Click({ $f.Close(); Start-WolAppProgrammListeNeu -Zeilen $geraeteZeilen }.GetNewClosure())
     $f.FindName('BtnSchliessen').Add_Click({ $f.Close() }.GetNewClosure())
 
     $f.Show()
@@ -1127,7 +1182,8 @@ function script:Show-WolAppDetails {
   </Grid>
 </Window>
 '@
-    $f.Title = "Programm-Updates auf $name"
+    $stand = Format-WolStand $S.DetailsStand
+    $f.Title = "Programm-Updates auf $name" + $(if ($stand) { " (gelesen am $stand)" } else { '' })
     $f.Owner = $script:Fenster
     $f.FindName('TabelleVerfuegbar').ItemsSource = $verfuegbar
     $f.FindName('TabelleVerlauf').ItemsSource = $verlauf
@@ -1204,7 +1260,10 @@ function script:Start-WolAppInstallieren {
 </Window>
 '@
     $f.Owner = $script:Fenster
-    $f.FindName('LblKopf').Text = "Updates auf $($mitDaten.Count) Gerät(en): $(Get-WolAppNamen -Zeilen $mitDaten)"
+    $staende = @($mitDaten | ForEach-Object { [string](Get-WolAppSync -Zeile $_).DetailsStand } | Where-Object { $_ } | Sort-Object)
+    $standText = ''
+    if ($staende.Count -gt 0) { $standText = "`r`nListe gelesen am: " + (Format-WolStand $staende[0]) + $(if ($staende[0] -ne $staende[-1]) { ' (ältester Stand)' } else { '' }) }
+    $f.FindName('LblKopf').Text = "Updates auf $($mitDaten.Count) Gerät(en): $(Get-WolAppNamen -Zeilen $mitDaten)$standText"
     $liste = $f.FindName('Liste')
     $boxen = [System.Collections.Generic.List[object]]::new()
     foreach ($a in @($apps.Values | Sort-Object { $_.Name })) {
@@ -1260,16 +1319,31 @@ function script:Start-WolAppDeinstallieren {
     if ($ziele) { Start-WolAppAktion -Aktion 'ProgrammeLesen' -Ziele $ziele }
 }
 
-## Installierte Programme anzeigen: Programmlisten der markierten Geräte lesen (danach öffnet der Timer die gemeinsame Liste)
+## Installierte Programme anzeigen: gespeicherte Listen sofort zeigen, nur Geräte ohne gespeicherte Liste werden gelesen (danach öffnet der Timer die gemeinsame Liste)
 function script:Start-WolAppProgrammListe {
     $ziele = Get-WolAppZiele
     if (-not $ziele) { return }
-    $lesen = @($ziele | Where-Object { $_.Ampel -eq 'Gruen' -and (Get-WolGruppeOffen -Gruppe 'APP' -Zeile $_) -eq 0 })
+    $ohneListe = @($ziele | Where-Object { @((Get-WolAppSync -Zeile $_).Programme).Count -eq 0 })
+    $lesen = @($ohneListe | Where-Object { $_.Ampel -eq 'Gruen' -and (Get-WolGruppeOffen -Gruppe 'APP' -Zeile $_) -eq 0 })
     if ($lesen.Count -eq 0) {
-        Show-WolMeldung 'Keines der markierten Geräte ist grün (WinRM erreichbar) oder frei (es läuft schon eine Aktion des Moduls).'
+        Show-WolAppProgrammListe -Lauf @{ Zeilen = @($ziele) }
         return
     }
-    $script:AppListeLauf = @{ Zeilen = $lesen }
+    $script:AppListeLauf = @{ Zeilen = @($ziele) }
+    Start-WolAppAktion -Aktion 'ProgrammeAnzeigen' -Ziele $lesen
+}
+
+## Programmlisten der Geräte aus der Liste-Anzeige neu lesen (Knopf "Neu auslesen"); Geräte ohne Verbindung behalten ihre gespeicherte Liste
+function script:Start-WolAppProgrammListeNeu {
+    param($Zeilen)
+    $Zeilen = @($Zeilen)
+    $lesen = @($Zeilen | Where-Object { $_.Ampel -eq 'Gruen' -and (Get-WolGruppeOffen -Gruppe 'APP' -Zeile $_) -eq 0 })
+    if ($lesen.Count -eq 0) {
+        Show-WolMeldung 'Keines der Geräte ist grün (WinRM erreichbar) oder frei (es läuft schon eine Aktion des Moduls). Die gespeicherten Listen bleiben erhalten.'
+        Show-WolAppProgrammListe -Lauf @{ Zeilen = $Zeilen }
+        return
+    }
+    $script:AppListeLauf = @{ Zeilen = $Zeilen }
     Start-WolAppAktion -Aktion 'ProgrammeAnzeigen' -Ziele $lesen
 }
 
@@ -1423,7 +1497,7 @@ function script:Show-WolModulAPP {
     <Button x:Name="BtnProgramm" Content="Programm installieren..." Padding="10,5" Margin="0,0,0,6"
             ToolTip="Installiert ein Programm aus WinGet (Id eingeben, zum Beispiel 7zip.7zip) auf den markierten Geräten"/>
     <Button x:Name="BtnProgListe" Content="Installierte Programme anzeigen..." Padding="10,5" Margin="0,0,0,6"
-            ToolTip="Liest die installierten Programme (WinGet) der markierten Geräte und zeigt sie in einer gemeinsamen Liste mit Suche, Filter und CSV-Export (nur Anzeige, es wird nichts verändert)"/>
+            ToolTip="Zeigt die installierten Programme (WinGet) der markierten Geräte in einer gemeinsamen Liste mit Suche, Filter und CSV-Export. Gespeicherte Listen erscheinen sofort mit Datum (gelesen am), nur Geräte ohne Liste werden gelesen; Neu auslesen in der Liste aktualisiert (nur Anzeige, es wird nichts verändert)"/>
     <Button x:Name="BtnDeinstall" Content="Programm deinstallieren..." Padding="10,5" Margin="0,0,0,6"
             ToolTip="Liest die installierten Programme (WinGet) eines markierten Geräts ein und deinstalliert das gewählte Programm still"/>
     <Button x:Name="BtnModul" Content="WinGet-Modul nachinstallieren" Padding="10,5" Margin="0,0,0,6"

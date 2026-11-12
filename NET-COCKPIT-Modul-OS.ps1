@@ -332,6 +332,7 @@ $script:OsBlock = {
                 ### Verfügbare Updates
                 $liste = @($res.Updates | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ KB = [string]$_.KB; Titel = [string]$_.Titel; Groesse = [string]$_.Groesse; Art = [string]$_.Art } })
                 $S.Details = $liste
+                $S.DetailsNeu = $true
                 $S.Updates = [string]$liste.Count
                 foreach ($u in $liste) { Write-Log ("{0} | {1} | {2} | {3}" -f $u.KB, $u.Titel, $u.Groesse, $u.Art) }
                 if ($res.OptionalFehler) { Write-Log "Suche nach optionalen Updates nicht möglich: $($res.OptionalFehler)" }
@@ -421,6 +422,7 @@ $script:OsBlock = {
 
                     $S.Updates = '-'
                     $S.Details = @()
+                    $S.DetailsNeu = $true
 
                     if ($null -eq $ergebnis) { $S.Status = 'Installation beendet, Ergebnis unbekannt' }
                     elseif ($ergebnis -ne 0) { $S.Status = "Installation beendet, Aufgaben-Code $ergebnis" }
@@ -449,15 +451,28 @@ $script:OsBlock = {
 function script:Get-WolOsSync {
     param($Zeile)
     if (-not $script:OsSync.ContainsKey($Zeile)) {
-        $script:OsSync[$Zeile] = [hashtable]::Synchronized(@{
+        $S = [hashtable]::Synchronized(@{
             Status = ''; Fehlertext = ''; Verbunden = $false
             Windows = ''; Modul = ''; Updates = ''; Letzte = ''; Neustart = ''; LetzterNeustart = ''
             GeplantBis = ''; GeplantBisGelesen = $false
             Details = @(); Verlauf = @()
+            DetailsStand = ''; DetailsNeu = $false
             Log = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
         })
+        $script:OsSync[$Zeile] = $S
+        Restore-WolOsListen -Zeile $Zeile -S $S
     }
     return $script:OsSync[$Zeile]
+}
+
+## Gespeicherte Listen "Verfügbare Updates" und "Update-Verlauf" des Geräts laden (Ordner des Geräts, Datei OS-Updates.json; Stand = gelesen am)
+function script:Restore-WolOsListen {
+    param($Zeile, $S)
+    $gespeichert = Read-WolGeraeteListe -Zeile $Zeile -Name 'OS-Updates'
+    if (-not $gespeichert) { return }
+    $S.Details = @(@($gespeichert.Daten.Details) | Where-Object { $_ })
+    $S.Verlauf = @(@($gespeichert.Daten.Verlauf) | Where-Object { $_ })
+    $S.DetailsStand = [string]$gespeichert.Stand
 }
 
 ## Werte aus dem Sync-Objekt in die Zeile übernehmen (nur Werte, die das Modul gelesen hat)
@@ -507,6 +522,10 @@ $script:OsFertig = {
     elseif (-not $S.Status) { $S.Status = 'Beendet' }
     Update-WolOsZeile -Zeile $z -S $S
     Save-WolWerteZeile -Zeile $z -Neu:($a.Daten.Aktion -eq 'Status' -and -not $S.Fehlertext)
+    if ($S.DetailsNeu) {
+        $S.DetailsNeu = $false
+        $S.DetailsStand = Save-WolGeraeteListe -Zeile $z -Name 'OS-Updates' -Daten ([ordered]@{ Details = @($S.Details); Verlauf = @($S.Verlauf) })
+    }
     $z.Status = [string]$S.Status
     Write-WolLog ("OS {0}: {1}" -f $a.Daten.Name, $S.Status)
 
@@ -610,7 +629,8 @@ function script:Show-WolOsDetails {
   </Grid>
 </Window>
 '@
-    $f.Title = "Updates auf $name"
+    $stand = Format-WolStand $S.DetailsStand
+    $f.Title = "Updates auf $name" + $(if ($stand) { " (gelesen am $stand)" } else { '' })
     $f.Owner = $script:Fenster
     $f.FindName('TabelleVerfuegbar').ItemsSource = $verfuegbar
     $f.FindName('TabelleVerlauf').ItemsSource = $verlauf
