@@ -228,6 +228,22 @@ try {
         })
     }
 
+    ### Alle installierten Programme (für den Reiter "Installierte Programme"; schlägt das fehl, bleibt die gespeicherte Liste erhalten)
+    $programmeOk = $false
+    $programme = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($p in @(Get-WinGetPackage)) {
+            $programme.Add([pscustomobject]@{
+                Name    = [string]$p.Name
+                Id      = [string]$p.Id
+                Version = [string]$p.InstalledVersion
+                Quelle  = [string]$p.Source
+            })
+        }
+        $programmeOk = $true
+    }
+    catch { $programmeOk = $false }
+
     ### Verlauf der Installationen durch das Cockpit (letzte 50 Einträge, neueste zuerst)
     $verlauf = New-Object System.Collections.Generic.List[object]
     if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
@@ -294,10 +310,12 @@ try {
         Verlauf       = @($verlauf.ToArray())
         WauVerlauf    = $wauAnzeige
         WauPfad       = $wauPfad
+        Programme     = @($programme.ToArray() | Sort-Object -Property Name)
+        ProgrammeOk   = $programmeOk
     }
 }
 catch {
-    $erg = [pscustomobject]@{ Fehler = ($_ | Out-String).Trim(); WingetVersion = ''; Updates = @(); Verlauf = @(); WauVerlauf = @(); WauPfad = '' }
+    $erg = [pscustomobject]@{ Fehler = ($_ | Out-String).Trim(); WingetVersion = ''; Updates = @(); Verlauf = @(); WauVerlauf = @(); WauPfad = ''; Programme = @(); ProgrammeOk = $false }
 }
 $erg | ConvertTo-Json -Depth 4 | Set-Content -Path $out -Encoding UTF8
 '@
@@ -501,6 +519,13 @@ $script:AppBlock = {
 
                 ### Update-Verlauf aus dem Log von Winget-AutoUpdate (WAU)
                 $S.WauVerlauf = @(@($res.WauVerlauf) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Datum = [string]$_.Datum; Name = [string]$_.Name; Id = [string]$_.Id; Von = [string]$_.Von; Nach = [string]$_.Nach; Ergebnis = [string]$_.Ergebnis } })
+                ### Alle installierten Programme (nur wenn die Abfrage auf dem Gerät geklappt hat)
+                if ($res.ProgrammeOk) {
+                    $S.Programme = @(@($res.Programme) | Where-Object { $_ } | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Id = [string]$_.Id; Version = [string]$_.Version; Quelle = [string]$_.Quelle } })
+                    $S.ProgrammeNeu = $true
+                    Write-Log "Installierte Programme: $(@($S.Programme).Count) gelesen"
+                }
+                else { Write-Log 'Installierte Programme konnten nicht gelesen werden, die gespeicherte Liste bleibt erhalten' }
                 if ($res.WauPfad) { Write-Log "WAU-Verlauf: $(@($S.WauVerlauf).Count) Einträge gelesen aus $($res.WauPfad)" }
                 else { Write-Log 'WAU-Log nicht vorhanden (C:\Program Files\Winget-AutoUpdate\logs\updates.log oder C:\Program Files\Winget-Autoupdate-aaS\Winget-AutoUpdate\logs\updates.log)' }
 
@@ -826,6 +851,10 @@ $script:AppFertig = {
         }
         else { Restore-WolAppProgramme -Zeile $z -S $S }
     }
+    elseif ($S.ProgrammeNeu) {
+        $S.ProgrammeNeu = $false
+        $S.ProgrammeStand = Save-WolGeraeteListe -Zeile $z -Name 'APP-Programme' -Daten @($S.Programme)
+    }
     ### Nach einer Deinstallation ist die gespeicherte Programmliste überholt
     if ($aktion -eq 'ProgrammDeinstallieren' -and -not $S.Fehlertext) {
         Remove-WolGeraeteListe -Zeile $z -Name 'APP-Programme'
@@ -1128,8 +1157,9 @@ function script:Show-WolAppDetails {
     $verfuegbar = @(@($S.Details) | Where-Object { $_ })
     $verlauf = @(@($S.Verlauf) | Where-Object { $_ })
     $wau = @(@($S.WauVerlauf) | Where-Object { $_ })
+    $programme = @(@($S.Programme) | Where-Object { $_ })
     $log = @($S.Log.ToArray())
-    if ($verfuegbar.Count -eq 0 -and $verlauf.Count -eq 0 -and $wau.Count -eq 0 -and $log.Count -eq 0) {
+    if ($verfuegbar.Count -eq 0 -and $verlauf.Count -eq 0 -and $wau.Count -eq 0 -and $programme.Count -eq 0 -and $log.Count -eq 0) {
         Show-WolMeldung "Für $name liegen noch keine Daten vor. Bitte zuerst Status prüfen."
         return
     }
@@ -1150,6 +1180,24 @@ function script:Show-WolAppDetails {
             <DataGridTextColumn Header="Quelle"      Binding="{Binding Quelle, Mode=OneWay}"     Width="90"/>
           </DataGrid.Columns>
         </DataGrid>
+      </TabItem>
+      <TabItem x:Name="TabProgramme">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,6,0,6">
+            <TextBlock Text="Suchen:" VerticalAlignment="Center" Margin="6,0,6,0"/>
+            <TextBox x:Name="TxtProgSuche" Width="300" ToolTip="Sucht in Name und Id"/>
+            <TextBlock x:Name="LblProgStand" VerticalAlignment="Center" Margin="18,0,0,0" Foreground="DimGray"/>
+          </StackPanel>
+          <DataGrid x:Name="TabelleProgramme" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Name"    Binding="{Binding Name, Mode=OneWay}"    Width="*"/>
+              <DataGridTextColumn Header="Id"      Binding="{Binding Id, Mode=OneWay}"      Width="320"/>
+              <DataGridTextColumn Header="Version" Binding="{Binding Version, Mode=OneWay}" Width="170"/>
+              <DataGridTextColumn Header="Quelle"  Binding="{Binding Quelle, Mode=OneWay}"  Width="90"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </Grid>
       </TabItem>
       <TabItem x:Name="TabVerlauf">
         <DataGrid x:Name="TabelleVerlauf" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
@@ -1189,12 +1237,29 @@ function script:Show-WolAppDetails {
     $f.FindName('TabelleVerlauf').ItemsSource = $verlauf
     $f.FindName('TabelleWau').ItemsSource = $wau
     $f.FindName('TabVerfuegbar').Header = "Verfügbare Updates ($($verfuegbar.Count))"
+    $f.FindName('TabProgramme').Header = "Installierte Programme ($($programme.Count))"
+    $f.FindName('TabelleProgramme').ItemsSource = $programme
+    $progStand = Format-WolStand $S.ProgrammeStand
+    $f.FindName('LblProgStand').Text = $(if ($progStand) { "gelesen am $progStand" } else { 'noch nicht gelesen (Status prüfen)' })
+    $progSuche = $f.FindName('TxtProgSuche')
+    $progAnsicht = [System.Windows.Data.CollectionViewSource]::GetDefaultView($programme)
+    $progSuche.Add_TextChanged({
+        $t = $progSuche.Text.Trim()
+        if ($t) {
+            $pruefen = {
+                param($p)
+                return (([string]$p.Name).IndexOf($t, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or (([string]$p.Id).IndexOf($t, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+            }.GetNewClosure()
+            $progAnsicht.Filter = [System.Predicate[object]]$pruefen
+        }
+        else { $progAnsicht.Filter = $null }
+    }.GetNewClosure())
     $f.FindName('TabVerlauf').Header = "Cockpit-Verlauf ($($verlauf.Count))"
     $f.FindName('TabWau').Header = "WAU-Verlauf ($($wau.Count))"
     $f.FindName('TabLog').Header = "Log ($($log.Count))"
     $f.FindName('TxtLog').Text = ($log -join "`r`n")
     if ($verfuegbar.Count -eq 0) {
-        $f.FindName('Reiter').SelectedIndex = $(if ($verlauf.Count -gt 0) { 1 } elseif ($wau.Count -gt 0) { 2 } else { 3 })
+        $f.FindName('Reiter').SelectedIndex = $(if ($programme.Count -gt 0) { 1 } elseif ($verlauf.Count -gt 0) { 2 } elseif ($wau.Count -gt 0) { 3 } else { 4 })
     }
     [void]$f.ShowDialog()
 }
