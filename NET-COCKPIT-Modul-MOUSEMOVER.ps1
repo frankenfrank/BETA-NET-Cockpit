@@ -7,7 +7,8 @@
     Wird vom NET-COCKPIT beim ersten Aufruf nachgeladen (liegt im selben Ordner) und öffnet ein kleines Fenster, das immer im Vordergrund bleibt.
     - Schiebeschalter I (an) und O (aus): ist er an, bewegt das Modul alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und gleich wieder 1 Pixel nach links (Windows-Eingabe über SendInput)
     - Das Fenster zeigt unter "Aktives Fenster" das Fenster unter dem Mauszeiger (dorthin geht die Bewegung): Titel und Programm, bei einem RDP-Tab des NET-COCKPIT zusätzlich den Server, dazu den Countdown bis zur nächsten Bewegung
-    - Beim Start ist der Mouse Mover aus; Fenster schließen oder das NET-COCKPIT beenden stoppt ihn
+    - Zusätzlich meldet das Modul Windows über SetThreadExecutionState, dass Rechner und Bildschirm gebraucht werden: Solange der Schalter an ist, gehen weder der Rechner in den Standby noch der Bildschirm aus (Energieoptionen und Sperrbildschirm-Zeitlimit greifen nicht)
+    - Beim Start ist der Mouse Mover aus; Aus-Schalten, Fenster schließen oder das NET-COCKPIT beenden stoppt ihn und setzt die Energieeinstellung von Windows zurück
     - Hält nur den lokalen Rechner wach; in einer RDP-Sitzung kommt die Bewegung nur an, solange der Mauszeiger über dem RDP-Fenster steht
     Das Modul speichert nichts.
 #>
@@ -51,6 +52,16 @@ public static class WolMausNative
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr fenster, uint art);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr fenster, StringBuilder text, int max);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr fenster, out uint prozessId);
+    [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint zustand);
+
+    // Rechner und Bildschirm wachhalten (an = true) oder die normale Energieeinstellung wiederherstellen (an = false)
+    // ES_CONTINUOUS 0x80000000, ES_SYSTEM_REQUIRED 0x00000001, ES_DISPLAY_REQUIRED 0x00000002; gilt für den aufrufenden Thread (hier der Fenster-Thread) bis zum Zurücksetzen
+    public static bool WachHalten(bool an)
+    {
+        uint zustand = 0x80000000;
+        if (an) { zustand |= 0x00000001 | 0x00000002; }
+        return SetThreadExecutionState(zustand) != 0;
+    }
 
     // Mauszeiger um dx Pixel in X-Richtung bewegen (relativ)
     public static bool Bewege(int dx)
@@ -155,7 +166,9 @@ function script:Invoke-WolMmTakt {
 function script:Set-WolMmZustand {
     param([bool]$An)
     $script:MmRest = $script:MmIntervall
-    Write-WolLog $(if ($An) { "MouseMover: an (alle $($script:MmIntervall) s)" } else { 'MouseMover: aus' })
+    ### Rechner und Bildschirm wachhalten, solange der Schalter an ist
+    try { $wach = [WolMausNative]::WachHalten($An) } catch { $wach = $false }
+    Write-WolLog $(if ($An) { "MouseMover: an (alle $($script:MmIntervall) s, Rechner und Bildschirm bleiben wach: $(if ($wach) { 'ja' } else { 'Fehler' }))" } else { 'MouseMover: aus' })
     Update-WolMmAnzeige
 }
 
@@ -218,6 +231,7 @@ function script:Show-WolModulMOUSEMOVER {
     ### Schließen: Mouse Mover stoppen
     $f.Add_Closed({
         $script:MmTimer.Stop()
+        try { [void][WolMausNative]::WachHalten($false) } catch { }
         if ($script:MmC.Schalter -and $script:MmC.Schalter.IsChecked) { Write-WolLog 'MouseMover: aus (Fenster geschlossen)' }
         $script:MmFenster = $null
         $script:MmC = @{}

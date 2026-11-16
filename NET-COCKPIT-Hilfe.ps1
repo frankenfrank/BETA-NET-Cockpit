@@ -197,13 +197,14 @@ $script:ModulInfo['SSH'] = {
 $script:ModulInfo['MOUSEMOVER'] = {
     @{ Titel = 'MouseMover'; Bloecke = @(
         @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Bewegt alle **30 Sekunden** den Mauszeiger **1 Pixel nach rechts** und gleich wieder **1 Pixel nach links**, damit der Rechner nicht in den Leerlauf geht. Das Fenster öffnet sich über **Werkzeuge > MouseMover** und bleibt immer im Vordergrund.' }
+        @{ T = 'p'; X = 'Bewegt alle **30 Sekunden** den Mauszeiger **1 Pixel nach rechts** und gleich wieder **1 Pixel nach links** und hält Rechner und Bildschirm wach (SetThreadExecutionState), damit der Rechner nicht in den Leerlauf geht. Das Fenster öffnet sich über **Werkzeuge > MouseMover** und bleibt immer im Vordergrund.' }
         @{ T = 'h'; X = 'Bedienung' }
         @{ T = 'i'; X = '**Schiebeschalter:** **I** = an, **O** = aus. Beim Öffnen des Fensters ist der Mouse Mover aus.' }
         @{ T = 'i'; X = '**Aktives Fenster:** das Fenster unter dem Mauszeiger (Titel und Programm), dorthin geht die Bewegung. Bei einem RDP-Tab des NET-COCKPIT steht zusätzlich der Server. Dazu der Countdown bis zur nächsten Bewegung.' }
         @{ T = 'i'; X = '**Fenster schließen** oder das NET-COCKPIT beenden stoppt den Mouse Mover. Es wird nichts gespeichert.' }
         @{ T = 'h'; X = 'Gut zu wissen' }
         @{ T = 'i'; X = '**Lokaler Rechner:** Der Mouse Mover hält den Rechner wach, auf dem das NET-COCKPIT läuft.' }
+        @{ T = 'i'; X = '**Bildschirm bleibt an:** Solange der Schalter an ist, meldet das Modul Windows zusätzlich (SetThreadExecutionState), dass Rechner und Bildschirm gebraucht werden. Der Rechner geht dann nicht in den Standby und der Bildschirm bleibt an. Beim Ausschalten, Schließen des Fensters oder Beenden des NET-COCKPIT gilt wieder die normale Energieeinstellung von Windows.' }
         @{ T = 'i'; X = '**RDP-Sitzungen:** Die Bewegung kommt in einer Sitzung nur an, solange der Mauszeiger über dem RDP-Fenster steht. Dann zählt sie dort als Eingabe.' }
         @{ T = 'i'; X = '**Richtlinien:** Eine per GPO erzwungene Sperre kann je nach Richtlinie trotzdem greifen.' }
         @{ T = 'w'; X = 'Noch nicht getestet: Schalter, Bewegung, Anzeige des Fensters unter dem Mauszeiger und Countdown auf einem echten Rechner.' }

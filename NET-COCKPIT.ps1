@@ -1978,7 +1978,7 @@ function Get-WolInfoInhalt {
         @{ T = 'h'; X = 'PowerShell-Befehl senden' }
         @{ T = 'i'; X = '**PowerShell-Befehl senden...:** führt den Text als PowerShell auf den markierten, grünen Geräten aus (höchstens 20). Die Ausgabe steht pro Gerät in einem eigenen Reiter. Der Befehl läuft als ScriptBlock auf dem Zielgerät, Eingaben wie Read-Host funktionieren dort nicht. "Skript laden..." lädt eine .ps1-Datei in das Textfeld.' }
         @{ T = 'h'; X = 'MouseMover' }
-        @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu weiter unten in diesem Reiter.' }
+        @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück und hält Rechner und Bildschirm wach. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu weiter unten in diesem Reiter.' }
     ) })
 
     $inhalt.Add(@{ Titel = 'Ansicht'; Bloecke = @(

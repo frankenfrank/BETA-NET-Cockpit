@@ -15,14 +15,15 @@ Write-Host ""
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host @'
 BESCHREIBUNG
-Exportiert die Veeam-Backup-Sitzungen der letzten 30 Tage als Textdatei (Veeam B&R v12+, PowerShell-Modul statt Snapin). Das Skript kann auf dem Veeam-Server selbst oder auf einem beliebigen anderen Server gestartet werden. Die Veeam-Abfrage läuft immer auf dem Veeam-Server (lokal bzw. per Invoke-Command), die Textdatei wird auf dem Rechner gespeichert, auf dem das Skript gestartet wurde.
+Exportiert die Veeam-Backup-Sitzungen der letzten 30 Tage als Textdatei (Veeam B&R v12+, PowerShell-Modul statt Snapin). Das Skript kann auf dem Veeam-Server selbst oder auf einem beliebigen anderen Server gestartet werden. Die Veeam-Abfrage läuft immer auf dem Veeam-Server (lokal bzw. als lokale geplante Aufgabe, die per Invoke-Command angelegt wird), die Textdatei wird auf dem Rechner gespeichert, auf dem das Skript gestartet wurde.
 
 Aus dem NET-COCKPIT (Modul WaToKi) gestartet bekommt das Skript den Veeam-Server (-Ziel), den Ausgabeordner (-Ausgabeordner) und das Konto der Spalte "Konto" (-Anmeldedaten) übergeben. Ohne Parameter fragt es den Servernamen selbst ab, speichert in C:\Temp und nutzt das angemeldete Windows-Konto.
 
 VORAUSSETZUNGEN
 - Auf dem Veeam-Server ist die Veeam Backup & Replication Console installiert (bringt das Modul Veeam.Backup.PowerShell mit)
-- PowerShell 7 auf dem ausführenden Rechner. Die Abfrage läuft auf dem Veeam-Server zuerst in PowerShell 7 (Veeam 13, Remoting-Endpunkt PowerShell.7 per Enable-PSRemoting in pwsh) und sonst in Windows PowerShell 5.1 (Veeam 12)
-- Bei Start von einem anderen Server: WinRM zum Veeam-Server erreichbar und Anmeldung mit einem Konto, das dort Administrator ist
+- PowerShell 7 auf dem ausführenden Rechner. Die Abfrage läuft auf dem Veeam-Server zuerst in PowerShell 7 (Veeam 13) und sonst in Windows PowerShell 5.1 (Veeam 12). Bei einem anderen Server startet das Skript dafür kurzzeitig eine geplante Aufgabe auf dem Veeam-Server (pwsh.exe lokal), weil das Veeam-13-Modul in einer WinRM-Sitzung nicht lädt. Die Aufgabe und ihre Dateien in C:\Windows\Temp werden danach wieder gelöscht
+- Bei Start von einem anderen Server: WinRM zum Veeam-Server erreichbar und Anmeldung mit einem Konto, das dort Administrator und in Veeam berechtigt ist; die Aufgabe läuft unter diesem Konto (ohne übergebenes Konto unter dem angemeldeten Konto)
+- PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) auf dem Veeam-Server, sonst läuft nur der Weg über Windows PowerShell 5.1
 '@ -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
@@ -134,12 +135,81 @@ $scriptBlock = {
     return $ergebnis
 }
 
+# - SCRIPTBLOCK FÜR LOKALE AUFGABE AUF DEM VEEAM-SERVER
+## Läuft per Invoke-Command auf dem Veeam-Server, legt dort eine einmalige geplante Aufgabe an (pwsh.exe lokal, nicht in einer WinRM-Sitzung), wartet auf das Ergebnis und räumt wieder auf
+$aufgabenBlock = {
+    param([string]$AbfrageText, $Konto)
+
+    $id = [guid]::NewGuid().ToString('N')
+    $skriptDatei = "C:\Windows\Temp\WaToKiVeeam_$id.ps1"
+    $jsonDatei = "C:\Windows\Temp\WaToKiVeeam_$id.json"
+    $aufgabenName = "WaToKiVeeam_$id"
+    $ergebnis = $null
+
+    try {
+        # -- POWERSHELL 7 PRÜFEN
+        $pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+        if (-not (Test-Path $pwsh)) {
+            throw "PowerShell 7 ist auf diesem Server nicht installiert ($pwsh)."
+        }
+
+        # -- SKRIPT FÜR DIE AUFGABE SCHREIBEN
+        $skriptZeilen = @(
+            "`$ErrorActionPreference = 'Stop'",
+            "`$abfrage = {",
+            $AbfrageText,
+            "}",
+            "try { `$e = & `$abfrage } catch { `$e = [pscustomobject]@{ Fehler = `$_.Exception.Message; Zeilen = @() } }",
+            "`$e | ConvertTo-Json -Compress -Depth 4 | Set-Content -Path '$jsonDatei' -Encoding UTF8"
+        )
+        ($skriptZeilen -join "`r`n") | Set-Content -Path $skriptDatei -Encoding UTF8
+
+        # -- AUFGABE ANLEGEN UND STARTEN
+        $aktion = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$skriptDatei`""
+        if ($Konto) {
+            $kennwort = $Konto.GetNetworkCredential().Password
+            Register-ScheduledTask -TaskName $aufgabenName -Action $aktion -User $Konto.UserName -Password $kennwort -RunLevel Highest -Force -ErrorAction Stop | Out-Null
+        }
+        else {
+            $prinzipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest
+            Register-ScheduledTask -TaskName $aufgabenName -Action $aktion -Principal $prinzipal -Force -ErrorAction Stop | Out-Null
+        }
+        Start-ScheduledTask -TaskName $aufgabenName -ErrorAction Stop
+
+        # -- AUF DAS ERGEBNIS WARTEN (höchstens 10 Minuten)
+        $start = Get-Date
+        while (-not (Test-Path $jsonDatei)) {
+            Start-Sleep -Seconds 3
+            $laufzeit = ((Get-Date) - $start).TotalSeconds
+            if ($laufzeit -gt 600) { throw 'Zeitüberschreitung: Die Aufgabe hat nach 10 Minuten kein Ergebnis geliefert.' }
+            if ($laufzeit -gt 30 -and (Get-ScheduledTask -TaskName $aufgabenName).State -ne 'Running') { Start-Sleep -Seconds 2; break }
+        }
+        if (-not (Test-Path $jsonDatei)) {
+            $code = (Get-ScheduledTaskInfo -TaskName $aufgabenName).LastTaskResult
+            throw "Die Aufgabe hat kein Ergebnis geschrieben (Aufgabencode $code)."
+        }
+        Start-Sleep -Seconds 1
+        $ergebnis = Get-Content -Path $jsonDatei -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        $ergebnis = [PSCustomObject]@{ Fehler = $_.Exception.Message; Zeilen = @() }
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $aufgabenName -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-Item -Path $skriptDatei, $jsonDatei -Force -ErrorAction SilentlyContinue
+    }
+
+    return $ergebnis
+}
+
 # - LOGS ABRUFEN
 ## Veeam 13 läuft in PowerShell 7, Veeam 12 nur in Windows PowerShell 5.1. Das Skript probiert erst PS7, bei Fehler PS 5.1.
+## Bei einem anderen Server läuft PS7 als lokale geplante Aufgabe auf dem Veeam-Server, weil das Veeam-13-Modul in einer WinRM-Sitzung nicht lädt (Hostpolicy-Fehler).
 $ergebnis = $null
 $fehlerListe = [System.Collections.Generic.List[string]]::new()
 
-foreach ($endpunkt in @('PowerShell 7', 'Windows PowerShell 5.1')) {
+$endpunkte = if ($istLokal) { @('PowerShell 7', 'Windows PowerShell 5.1') } else { @('PowerShell 7 (lokale Aufgabe)', 'Windows PowerShell 5.1') }
+foreach ($endpunkt in $endpunkte) {
     $antwort = $null
     try {
         if ($istLokal) {
@@ -154,9 +224,13 @@ foreach ($endpunkt in @('PowerShell 7', 'Windows PowerShell 5.1')) {
             }
         }
         else {
-            $invokeParameter = @{ ComputerName = $veeamServer; ScriptBlock = $scriptBlock; ErrorAction = 'Stop' }
-            if ($endpunkt -eq 'PowerShell 7') { $invokeParameter.ConfigurationName = 'PowerShell.7' }
+            $invokeParameter = @{ ComputerName = $veeamServer; ErrorAction = 'Stop' }
             if ($Anmeldedaten) { $invokeParameter.Credential = $Anmeldedaten }
+            if ($endpunkt -like 'PowerShell 7*') {
+                $invokeParameter.ScriptBlock = $aufgabenBlock
+                $invokeParameter.ArgumentList = @($scriptBlock.ToString(), $Anmeldedaten)
+            }
+            else { $invokeParameter.ScriptBlock = $scriptBlock }
             $antwort = Invoke-Command @invokeParameter
         }
     }
@@ -204,4 +278,4 @@ if (Test-Path $targetFile) {
 }
 else {
     Write-Host "Keine Datei erstellt." -ForegroundColor Red
-}
+}
