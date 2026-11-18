@@ -482,7 +482,7 @@ function script:ConvertTo-WolWtWertHtml {
 }
 
 function script:New-WolWtTechnikerHtml {
-    param($Gesamt, [string]$Pfad)
+    param($Gesamt, [string]$Pfad, $Konsolen = @())
     $e = { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
     $kurzZiel = { param($z) $s = ([string]$z).Trim(); if ($s -match '^\d+(\.\d+){3}$') { $s } else { ($s -split '\.')[0] } }
     $eig = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.PSObject.Properties[$n].Value } else { $null } }
@@ -597,8 +597,9 @@ function script:New-WolWtTechnikerHtml {
     }
     # Anhang: Konsolenausgabe der Skripte
     [void]$h.AppendLine('<h2 class="seite">Anhang: Konsolenausgabe der Skripte</h2>')
-    foreach ($s in $skripte) {
-        $k = ([string]$s.Konsole) -replace '\x1B\[[0-9;]*[A-Za-z]', ''
+    for ($i = 0; $i -lt $skripte.Count; $i++) {
+        $s = $skripte[$i]
+        $k = $(if ($i -lt @($Konsolen).Count) { [string]@($Konsolen)[$i] } else { '' }) -replace '\x1B\[[0-9;]*[A-Za-z]', ''
         [void]$h.AppendLine('<h3>' + (& $e $s.Skript) + '</h3>' + $(if ($k.Trim()) { '<pre>' + (& $e $k.TrimEnd()) + '</pre>' } else { '<p class="na">Keine Ausgabe.</p>' }))
     }
     [void]$h.AppendLine('</body></html>')
@@ -639,7 +640,7 @@ function script:Complete-WolWtAutomatik {
             if ($e.Konsole) { $text.Add($e.Konsole.TrimEnd()) }
         }
         ($text -join "`r`n") | Set-Content -LiteralPath (Join-Path $l.Ordner 'Detail.txt') -Encoding utf8BOM
-        try { New-WolWtTechnikerHtml -Gesamt $gesamt -Pfad (Join-Path $l.Ordner 'Techniker-Uebersicht.html') }
+        try { New-WolWtTechnikerHtml -Gesamt $gesamt -Pfad (Join-Path $l.Ordner 'Techniker-Uebersicht.html') -Konsolen @($l.Ergebnisse | ForEach-Object { [string]$_.Konsole }) }
         catch { Write-WolLog "WaToKi-Automatik: Techniker-Übersicht nicht geschrieben: $($_.Exception.Message)" }
         Write-WolLog "WaToKi-Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }) ($($l.Ordner))"
         $meldung = "Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }). Ordner: $($l.Ordner)"
