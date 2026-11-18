@@ -30,9 +30,9 @@ Prüft den Entra Connect/ADSync-Synchronisierungsstatus (letzter Lauf, Version, 
 Aus dem NET-COCKPIT (Modul WaToKi) gestartet bekommt das Skript den Entra-Connect-Server (-Ziel), den Ausgabeordner (-Ausgabeordner) und das Konto der Spalte "Konto" (-Anmeldedaten). Dann entfällt die Abfrage des Servernamens. Wird das Konto abgelehnt, fragt das Skript nach.
 
 VORAUSSETZUNGEN
-- PowerShell 7 auf dem ausführenden Rechner
+- PowerShell 7 auf dem ausführenden Rechner (nicht auf dem Entra-Connect-Server)
 - Lokal: Ausführung auf dem Server mit Microsoft Entra Connect (Azure AD Connect)
-- Remote: WinRM (PowerShell Remoting) mit PowerShell-7-Endpunkt (PowerShell.7) auf dem Entra-Connect-Server aktiv, Ausführung mit dem Konto aus dem NET-COCKPIT bzw. dem aktuellen Konto
+- Remote: WinRM (PowerShell Remoting) auf dem Entra-Connect-Server aktiv (Standard-Endpunkt mit Windows PowerShell 5.1, PowerShell 7 ist auf dem Entra-Connect-Server nicht nötig), Ausführung mit dem Konto aus dem NET-COCKPIT bzw. dem aktuellen Konto
 - Lokale Admin-Rechte auf dem Entra-Connect-Server (Application-Eventlog, Konfigurationssicherung)
 - ADSync-PowerShell-Modul auf dem Entra-Connect-Server vorhanden
 - Lesezugriff auf das Active Directory vom ausführenden Server aus (Prüfung des Kontos AZUREADSSOACC)
@@ -72,7 +72,7 @@ if ($isRemote) {
   Write-Host "`nPrüfe WinRM-Verbindung zu $targetName ..." -ForegroundColor Cyan
   try {
     Test-WSMan -ComputerName $targetName -ErrorAction Stop | Out-Null
-    $sitzungParam = @{ ComputerName = $targetName; ConfigurationName = 'PowerShell.7'; ErrorAction = 'Stop' }
+    $sitzungParam = @{ ComputerName = $targetName; ErrorAction = 'Stop' }
     if ($Anmeldedaten) { $sitzungParam.Credential = $Anmeldedaten }
     try {
       $session = New-PSSession @sitzungParam
@@ -87,7 +87,9 @@ if ($isRemote) {
     Write-Host "WinRM-Verbindung zu $targetName nicht möglich: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Prüfen: WinRM auf dem Zielserver aktiv, Firewall (TCP 5985), Namensauflösung, Konto mit lokalen Adminrechten auf dem Zielserver." -ForegroundColor Yellow
     if ($Automatik) {
-      Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'WinRM-Verbindung nicht möglich' })
+      $grund = ($_.Exception.Message -replace '\s+', ' ').Trim()
+      if ($grund.Length -gt 200) { $grund = $grund.Substring(0, 200) + '...' }
+      Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = "WinRM-Verbindung nicht möglich: $grund" })
       exit 1
     }
     return
@@ -103,6 +105,7 @@ $collect = {
     ComputerName        = $env:COMPUTERNAME
     DomainName          = (Get-CimInstance -ClassName Win32_ComputerSystem).Domain
     AdSyncModuleOk      = $false
+    ModulFehler         = $null
     SchedulerError      = $null
     SchedulerEnabled    = $null
     SchedulerInProgress = $null
@@ -119,7 +122,10 @@ $collect = {
   }
 
   ## ADSync-Modul
-  try { Import-Module ADSync -UseWindowsPowerShell -ErrorAction Stop; $r.AdSyncModuleOk = $true } catch {}
+  try {
+    if ($PSVersionTable.PSVersion.Major -ge 6) { Import-Module ADSync -UseWindowsPowerShell -ErrorAction Stop } else { Import-Module ADSync -ErrorAction Stop }
+    $r.AdSyncModuleOk = $true
+  } catch { $r.ModulFehler = $_.Exception.Message }
   if (-not $r.AdSyncModuleOk) { return [pscustomobject]$r }
 
   ## Scheduler
@@ -199,7 +205,9 @@ try {
   Write-Host "Datensammlung auf $targetName fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red
   if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
   if ($Automatik) {
-    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Datensammlung fehlgeschlagen' })
+    $grund = ($_.Exception.Message -replace '\s+', ' ').Trim()
+    if ($grund.Length -gt 200) { $grund = $grund.Substring(0, 200) + '...' }
+    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = "Datensammlung fehlgeschlagen: $grund" })
     exit 1
   }
   return
@@ -209,9 +217,15 @@ try {
 if (-not $data.AdSyncModuleOk) {
   Write-Host "`nAbbruch: Auf $targetName ist kein Entra Connect (ADSync-Modul) vorhanden." -ForegroundColor Red
   Write-Host "Bitte den Server mit Microsoft Entra Connect angeben." -ForegroundColor Yellow
+  $grund = ''
+  if ($data.ModulFehler) {
+    $grund = ($data.ModulFehler -replace '\s+', ' ').Trim()
+    if ($grund.Length -gt 200) { $grund = $grund.Substring(0, 200) + '...' }
+    Write-Host "Meldung beim Laden des Moduls: $grund" -ForegroundColor Yellow
+  }
   if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
   if ($Automatik) {
-    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Kein Entra Connect (ADSync-Modul) auf dem Server' })
+    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = $(if ($grund) { "Kein Entra Connect (ADSync-Modul) auf dem Server: $grund" } else { 'Kein Entra Connect (ADSync-Modul) auf dem Server' }) })
     exit 1
   }
   return

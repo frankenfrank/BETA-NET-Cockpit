@@ -18,7 +18,7 @@
     - Voraussetzungen: Skript kennt -Automatik, keine Syntaxfehler, Kennwörter der Konten sind in der Sitzung vorhanden; sonst Status "übersprungen" mit Grund
     - Vor dem Start fragt das Cockpit fehlende Kennwörter der Konten ab (einmal pro Benutzername)
     - Knopf "Automatik stoppen": beendet das laufende Skript, startet die übrigen nicht mehr (Status abgebrochen) und speichert die bisherigen Ergebnisse
-    - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die letzte Konsolenzeile in der Meldung)
+    - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die Notiz aus der Ergebnisdatei in der Meldung, sonst die letzte Konsolenzeile)
     - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Gesamtdatei.json (maschinenlesbar für den Warterator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts)
     - Vertrag für die Skripte: ein Skript mit -Automatik fragt nichts ab, öffnet nichts und schreibt seine Werte für die Checkliste als Ergebnis_<Skriptname ohne Wartung- und .ps1>.json in -Ausgabeordner (wird unverändert in die Gesamtdatei übernommen); alles Ausführliche gibt es auf der Konsole aus (landet in Detail.txt)
     Sonst speichert das Modul nichts.
@@ -545,8 +545,22 @@ function script:Complete-WolWtAktuell {
     elseif ($code -eq '0') { $status = 'OK'; $meldung = '' }
     else {
         $status = 'Fehler'; $meldung = "Exitcode $code"
-        $letzte = @(($konsole -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1)
-        if ($letzte.Count -gt 0) { $z = $letzte[0].Trim(); if ($z.Length -gt 140) { $z = $z.Substring(0, 140) + '...' }; $meldung += ": $z" }
+        $z = ''
+        try {
+            if ($l.AktuellErgebnis -and (Test-Path -LiteralPath $l.AktuellErgebnis)) {
+                $erg = Get-Content -LiteralPath $l.AktuellErgebnis -Raw -Encoding utf8 | ConvertFrom-Json -Depth 50
+                $notizen = @($erg.Ergebnisse | Where-Object { -not $_.Erreicht -and $_.Notiz } | ForEach-Object {
+                        $zk = $(if ([string]$_.Ziel -match '^\d+\.\d+\.\d+\.\d+$') { [string]$_.Ziel } else { ([string]$_.Ziel -split '\.')[0] })
+                        "${zk}: $($_.Notiz)"
+                    })
+                if ($notizen.Count -gt 0) { $z = ($notizen | Select-Object -Unique) -join ' | ' }
+            }
+        } catch { }
+        if (-not $z) {
+            $letzte = @(($konsole -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1)
+            if ($letzte.Count -gt 0) { $z = $letzte[0].Trim() }
+        }
+        if ($z) { if ($z.Length -gt 300) { $z = $z.Substring(0, 300) + '...' }; $meldung += ": $z" }
     }
     Add-WolWtErgebnis -Item $l.AktuellItem -Status $status -Meldung $meldung -Start $script:WtStart -Ende $ende -Konsole $konsole -Ergebnisdatei $l.AktuellErgebnis
     $script:WtProzess = $null
