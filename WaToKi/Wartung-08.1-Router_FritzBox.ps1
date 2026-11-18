@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-08.1-Router_FritzBox ===" -ForegroundColor Cyan
 
@@ -29,13 +38,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Fritz!Box) nötig." -ForegroundColor Red
+    exit 1
+}
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -56,6 +71,7 @@ function Get-ZielAnmeldung {
         $c = Get-ZielKonto -Name $Name
         if ($c) { return $c }
     }
+    if ($Automatik) { return $null }
     return (Get-Credential -Message $Meldung)
 }
 
@@ -324,6 +340,7 @@ function Get-FritzStatus {
 
         if ($status) {
             Write-Log "Status            : $($status['NewConnectionStatus'])"
+            $sum.Verbindung = [string]$status['NewConnectionStatus']
             $up = [double]$status['NewUptime']
             $reconnect = '{0:dd.MM.yyyy HH:mm:ss}' -f (Get-Date).AddSeconds(-$up)
             Write-Log ("Letzter Reconnect : {0}  (online seit {1})" -f $reconnect, (Format-Duration $up))
@@ -525,4 +542,36 @@ foreach ($s in $Zusammenfassung) {
 }
 
 Write-Log "`n`nErgebnisdatei: $AusgabeDatei"
+
+if ($Automatik) {
+    # - ERGEBNIS FÜR DIE CHECKLISTE (Haken nur bei belegter Aussage: Firmware = Abruf der Version und ausdrücklich kein Update; Internet = Verbindung "Connected" mit externer IP)
+    $ergebnisListe = foreach ($s in $Zusammenfassung) {
+        $abgerufen = [bool]$s.Modell
+        $pr = [ordered]@{}
+        if ($abgerufen) {
+            if ($s.OS -and $s.Update -eq 'Nein') { $pr['FirmwareAktuell'] = $true }
+            elseif ($s.Update -like 'Ja*') { $pr['FirmwareAktuell'] = $false }
+            if ($s.Verbindung) { $pr['InternetOnline'] = (($s.Verbindung -eq 'Connected') -and [bool]$s.IPv4) }
+        }
+        $teile = @()
+        if ($abgerufen) {
+            $teile += "$($s.Modell), FRITZ!OS $($s.OS)"
+            if ($s.Update) { $teile += "Update: $($s.Update)" }
+            if ($s.IPv4) { $teile += "IP $($s.IPv4)" }
+            if ($s.Download -or $s.Upload) { $teile += "$($s.Download) / $($s.Upload)" }
+            if ($s.Probleme) { $teile += "nicht abrufbar: $($s.Probleme)" }
+        } else { $teile += [string]$s.Status }
+        [pscustomobject]@{
+            Ziel       = [string]$s.Fritzbox
+            Erreicht   = $abgerufen
+            Pruefungen = [pscustomobject]$pr
+            Werte      = [pscustomobject]@{ Modell = $s.Modell; FritzOS = $s.OS; Update = $s.Update; Verbindung = $s.Verbindung; Reconnect = $s.Reconnect; ExterneIPv4 = $s.IPv4; Download = $s.Download; Upload = $s.Upload; LogTreffer = $s.LogTreffer }
+            Notiz      = ($teile -join '; ')
+        }
+    }
+    Write-WtErgebnis -Skript '08.1-Router_FritzBox' -Ordner $Ausgabepfad -Ergebnisse @($ergebnisListe)
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Invoke-Item $AusgabeDatei

@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [pscredential]$Anmeldedaten
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-06.2-EntraSync ===" -ForegroundColor Cyan
 Write-Host ""
@@ -32,8 +41,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -48,7 +59,7 @@ $syncDetailsPath = Join-Path $logFolder "Wartung-$datum-EntraSync.txt"
 if (-not (Test-Path $logFolder)) { New-Item -ItemType Directory -Path $logFolder | Out-Null }
 
 # - ZIELSERVER ABFRAGEN
-$serverInput = if ([string]::IsNullOrWhiteSpace($Ziel)) { (Read-Host "Name des Entra-Connect-Servers (leer = dieser Server)").Trim() } else { $Ziel.Trim() }
+$serverInput = if ([string]::IsNullOrWhiteSpace($Ziel)) { if ($Automatik) { '' } else { (Read-Host "Name des Entra-Connect-Servers (leer = dieser Server)").Trim() } } else { $Ziel.Trim() }
 $localNames = @('', '.', 'localhost', $env:COMPUTERNAME)
 $isRemote = -not ($localNames -contains $serverInput)
 $targetName = if ($isRemote) { $serverInput } else { $env:COMPUTERNAME }
@@ -66,7 +77,7 @@ if ($isRemote) {
     try {
       $session = New-PSSession @sitzungParam
     } catch {
-      if (-not $Anmeldedaten) { throw }
+      if (-not $Anmeldedaten -or $Automatik) { throw }
       Write-Host "Anmeldung mit dem Konto aus dem NET-COCKPIT fehlgeschlagen - Zugangsdaten abfragen" -ForegroundColor Yellow
       $sitzungParam.Credential = Get-Credential -Message "Zugangsdaten für $targetName"
       $session = New-PSSession @sitzungParam
@@ -75,6 +86,10 @@ if ($isRemote) {
   } catch {
     Write-Host "WinRM-Verbindung zu $targetName nicht möglich: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "Prüfen: WinRM auf dem Zielserver aktiv, Firewall (TCP 5985), Namensauflösung, Konto mit lokalen Adminrechten auf dem Zielserver." -ForegroundColor Yellow
+    if ($Automatik) {
+      Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'WinRM-Verbindung nicht möglich' })
+      exit 1
+    }
     return
   }
 }
@@ -183,6 +198,10 @@ try {
 } catch {
   Write-Host "Datensammlung auf $targetName fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red
   if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
+  if ($Automatik) {
+    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Datensammlung fehlgeschlagen' })
+    exit 1
+  }
   return
 }
 
@@ -191,6 +210,10 @@ if (-not $data.AdSyncModuleOk) {
   Write-Host "`nAbbruch: Auf $targetName ist kein Entra Connect (ADSync-Modul) vorhanden." -ForegroundColor Red
   Write-Host "Bitte den Server mit Microsoft Entra Connect angeben." -ForegroundColor Yellow
   if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
+  if ($Automatik) {
+    Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Kein Entra Connect (ADSync-Modul) auf dem Server' })
+    exit 1
+  }
   return
 }
 
@@ -201,6 +224,7 @@ if ($data.AdSyncModuleOk) {
 
   ## Log-Datei
   $data.LogText | Out-File -FilePath $syncDetailsPath -Encoding UTF8
+  if ($Automatik -and $data.LogText) { Write-Host $data.LogText }
 
   ## Konfigurationssicherung
   if ($data.BackupPath) {
@@ -266,7 +290,7 @@ if (-not $data.AdSyncModuleOk) {
     Write-Host ("Geprüfte Events im Zeitraum des Laufs: {0}" -f $data.EventsChecked)
     Write-Host ("Gefundene Fehler/Warnungen: {0}" -f $data.IssueCount) -ForegroundColor Red
     Write-Host ("Log-Datei: {0}" -f $syncDetailsPath)
-    Start-Process notepad.exe $syncDetailsPath
+    if (-not $Automatik) { Start-Process notepad.exe $syncDetailsPath }
   }
 
   ## Scheduler
@@ -306,4 +330,29 @@ if ($keyError) {
     Write-Host "Rollover nicht notwendig." -ForegroundColor Green
   }
   Write-Host "Hinweis: Microsoft empfiehlt, den Key mindestens alle 30 Tage zu erneuern." -ForegroundColor Cyan
+}
+
+# - ERGEBNIS FÜR DIE CHECKLISTE (Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+if ($Automatik) {
+  $pr = [ordered]@{}
+  $probleme = @()
+  $werte = [ordered]@{ Version = [string]$data.Version }
+  if (-not $data.NoRunFound) {
+    $pr['SyncOk'] = [bool]$data.IsLastRunOk
+    $werte['LetzterLauf'] = $(if ($data.LastSuccessTime) { ([datetime]$data.LastSuccessTime).ToString('yyyy-MM-dd HH:mm') } else { $null })
+    $werte['FehlerWarnungen'] = $data.IssueCount
+    if (-not $data.IsLastRunOk) { $probleme += 'Letzter Sync-Lauf mit Fehlern' }
+  } else {
+    $probleme += 'Kein Sync-Lauf im Eventlog gefunden'
+  }
+  if ($ssoAvailable) {
+    $pr['SeamlessKeyOk'] = ($ageDays -le $thresholdDays)
+    $werte['SeamlessKeyAlterTage'] = $ageDays
+    if ($ageDays -gt $thresholdDays) { $probleme += "Seamless-SSO-Key $ageDays Tage alt (Rollover nötig)" }
+  }
+  if ($data.BackupPath) { $pr['KonfigSicherung'] = $true }
+  $notiz = $(if ($data.Version) { "Version $($data.Version)" } else { '' })
+  if ($probleme.Count -gt 0) { $notiz = (@($notiz) + $probleme | Where-Object { $_ }) -join '; ' }
+  Write-WtErgebnis -Skript '06.2-EntraSync' -Ordner $logFolder -Ergebnisse @([pscustomobject]@{ Ziel = $targetName; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notiz })
+  exit 0
 }

@@ -3,10 +3,20 @@
 # - EINGABEPARAMETER (werden vom NET-COCKPIT, Modul WaToKi, übergeben; ohne Angabe fragt das Skript wie gewohnt)
 param(
     [string[]]$Ziel,
-    [string]$Ausgabeordner
+    [string]$Ausgabeordner,
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-08.5-USV ===" -ForegroundColor Cyan
 Write-Host ""
@@ -16,7 +26,7 @@ Write-Host @'
 BESCHREIBUNG
 Fragt USV-Status per SNMP (Standard UPS-MIB, RFC 1628) ab – Batteriestatus, Restlaufzeit, Ladezustand, Ausgangsquelle, Last, Alarme – und gibt das Ergebnis in Datei/Konsole aus.
 
-Aus dem NET-COCKPIT (Modul WaToKi) gestartet bekommt das Skript die markierten USV (-Ziel), den Ausgabeordner (-Ausgabeordner). Dann entfällt die Listenpflege. Ohne -Ziel läuft das Skript wie bisher interaktiv.
+Aus dem NET-COCKPIT (Modul WaToKi) gestartet bekommt das Skript die markierten USV (-Ziel), den Ausgabeordner (-Ausgabeordner) und das Konto der Spalte "Konto" (-Anmeldedaten, das Kennwort ist die SNMP-Community; ohne Konto gilt 'public'). SNMP-Version 2. Dann entfallen Listenpflege und Abfragen. Ohne -Ziel läuft das Skript wie bisher interaktiv.
 
 VORAUSSETZUNGEN
 - PowerShell 7
@@ -27,13 +37,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (USV) nötig." -ForegroundColor Red
+    exit 1
+}
 
 
 # - AUSGABEDATEI
@@ -55,7 +71,8 @@ function Write-Log {
 # - SNMP-MODUL PRUEFEN
 if (-not (Get-Module -ListAvailable -Name SNMP)) {
     Write-Log "SNMP-Modul ist nicht installiert."
-    if ((Read-Host "SNMP-Modul jetzt installieren? (j/n)") -ne "j") {
+    $installAntwort = if ($Automatik) { 'j' } else { Read-Host "SNMP-Modul jetzt installieren? (j/n)" }
+    if ($installAntwort -ne "j") {
         Write-Log "Installation abgelehnt - Skript wird beendet."
         return
     }
@@ -174,16 +191,24 @@ foreach ($USV in $USVListe) {
 if ($USVErreichbar.Count -eq 0) {
     Write-Log ""
     Write-Log "Keine USV erreichbar - Skript wird beendet."
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '08.5-USV' -Ordner $Ausgabepfad -Ergebnisse @($USVListe | ForEach-Object { [pscustomobject]@{ Ziel = [string]$_; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Nicht erreichbar (Ping, TCP 80 und 443 fehlgeschlagen)' } })
+        exit 1
+    }
     Invoke-Item $AusgabeDatei
     return
 }
 
 # - SNMP
 # --- SNMP-Zugangsdaten (gelten fuer ALLE USV in der Liste) ---
-$SnmpCommunity = Read-Host "SNMP Community (leer = 'public')"
+if ($Automatik) {
+    $SnmpCommunity = if ($Anmeldedaten) { $Anmeldedaten.GetNetworkCredential().Password } else { "" }
+    $SnmpVersionInput = "2"
+} else {
+    $SnmpCommunity = Read-Host "SNMP Community (leer = 'public')"
+    $SnmpVersionInput = Read-Host "SNMP Version - 1 oder 2 (leer = 2)"
+}
 if ([string]::IsNullOrWhiteSpace($SnmpCommunity)) { $SnmpCommunity = "public" }
-
-$SnmpVersionInput = Read-Host "SNMP Version - 1 oder 2 (leer = 2)"
 $SnmpVersion = if ($SnmpVersionInput -eq "1") { "V1" } else { "V2" }
 
 $SnmpTimeout = 3000
@@ -315,4 +340,28 @@ foreach ($s in $Zusammenfassung) {
 
 Write-Output ""
 Write-Output "Ergebnisdatei: $AusgabeDatei"
+
+if ($Automatik) {
+    # - ERGEBNIS FÜR DIE CHECKLISTE (Haken nur bei belegter Aussage: USV per SNMP erreichbar; Batterie = Batteriestatus "normal")
+    $ergebnisListe = foreach ($s in $Zusammenfassung) {
+        if ($s.Status -ne 'OK') {
+            [pscustomobject]@{ Ziel = [string]$s.USV; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = [string]$s.Status }
+            continue
+        }
+        $pr = [ordered]@{ UsvErreichbar = $true }
+        if ($s.Batterie -match '^\d') { $pr['BatterieOk'] = ($s.Batterie -match '^2 ') }
+        $teile = @("$($s.Hersteller) $($s.Modell)".Trim(), "Batterie: $($s.Batterie)", "Ladezustand: $($s.Ladezustand)", "Restlaufzeit: $($s.Restlaufzeit)", "Last: $($s.Last)", "Alarme: $($s.Alarme)")
+        [pscustomobject]@{
+            Ziel       = [string]$s.USV
+            Erreicht   = $true
+            Pruefungen = [pscustomobject]$pr
+            Werte      = [pscustomobject]@{ Hersteller = [string]$s.Hersteller; Modell = [string]$s.Modell; Batterie = [string]$s.Batterie; Restlaufzeit = [string]$s.Restlaufzeit; Ladezustand = [string]$s.Ladezustand; Ausgangsquelle = [string]$s.Ausgangsquelle; Last = [string]$s.Last; Alarme = [string]$s.Alarme }
+            Notiz      = (($teile | Where-Object { $_ }) -join '; ')
+        }
+    }
+    Write-WtErgebnis -Skript '08.5-USV' -Ordner $Ausgabepfad -Ergebnisse @($ergebnisListe)
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Invoke-Item $AusgabeDatei

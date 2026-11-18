@@ -5,10 +5,19 @@ param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
     [System.Management.Automation.PSCredential]$Anmeldedaten,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-03.1-physServerIPMI ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,8 +38,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - VERZEICHNIS UND DATEINAME
 $LogPath = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
@@ -117,6 +128,7 @@ $Report = @()
 $Report += "Wartung physische Server IPMI - $(Get-Date -Format 'dd.MM.yyyy HH:mm')"
 $Report += "Ausgeführt auf: $env:COMPUTERNAME"
 $Report += ""
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 
 foreach ($Server in $ServerListe) {
     Write-Host "  -> $Server ..." -ForegroundColor Yellow
@@ -149,8 +161,15 @@ foreach ($Server in $ServerListe) {
         Write-Host "     Fehler: $fehler" -ForegroundColor Red
         $Report += "FEHLER: $fehler"
         $Report += ""
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $Server; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = $fehler })
         continue
     }
+    ### Checklisten-Werte: IPMI liefert keine eindeutige Zuordnung zu RAID/Firmware/BIOS/Netzteile, daher keine Haken, nur Kennzahlen
+    $ergebnisListe.Add([pscustomobject]@{
+        Ziel = $Server; Erreicht = $true; Pruefungen = [pscustomobject]@{}
+        Werte = [pscustomobject]@{ SensorAbweichungen = @($antwort.Sensor).Count; SelEintraege30Tage = @($antwort.Sel).Count }
+        Notiz = $(if (@($antwort.Sensor).Count -gt 0 -or @($antwort.Sel).Count -gt 0) { "IPMI: $(@($antwort.Sensor).Count) Sensor-Abweichungen, $(@($antwort.Sel).Count) SEL-Einträge (30 Tage), Details siehe Technikerinfo" } else { '' })
+    })
 
     $Report += "===== IPMIUTIL HEALTH ====="
     $Report += $antwort.Health
@@ -164,9 +183,14 @@ foreach ($Server in $ServerListe) {
 }
 
 # - AUSGABE (KONSOLE + DATEI)
-Clear-Host
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 $Report | Out-Host
 $Report | Out-File -LiteralPath $LogFile -Encoding utf8
 
 Write-Host "`nDatei gespeichert unter: $LogFile `n" -ForegroundColor Cyan
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '03.1-physServerIPMI' -Ordner $LogPath -Ergebnisse $ergebnisListe.ToArray()
+    exit $(if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -gt 0) { 0 } else { 1 })
+}

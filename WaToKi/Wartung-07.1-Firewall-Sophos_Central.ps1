@@ -2,10 +2,21 @@
 
 # - EINGABEPARAMETER (werden vom NET-COCKPIT, Modul WaToKi, übergeben; ohne Angabe fragt das Skript wie gewohnt)
 param(
-    [string]$Ausgabeordner
+    [string]$Ziel,
+    [string]$Ausgabeordner,
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-07.1-Firewall-Sophos_Central ===" -ForegroundColor Cyan
 Write-Host ""
@@ -15,7 +26,7 @@ Write-Host @'
 BESCHREIBUNG
 Prüft Sophos Central per API (Endpoint-Health, Tamper Protection, letzter Kontakt, offene Alerts, Firewalls inkl. Firmware/Verbindung, Lizenzen) und schreibt das Ergebnis in eine Logdatei. Bei Partner-/Organisations-Zugang werden alle Mandanten nacheinander geprüft.
 
-Aus dem NET-COCKPIT (Modul WaToKi) gestartet wird der Ausgabeordner (-Ausgabeordner) übergeben. Es gibt kein Zielgerät, die Abfrage läuft über die Sophos-Cloud (ClientID und Clientschlüssel werden abgefragt).
+Aus dem NET-COCKPIT (Modul WaToKi) gestartet wird der Ausgabeordner (-Ausgabeordner), der Eintrag der Tabelle (-Ziel, nur als Bezeichnung) und das Konto der Spalte "Konto" (-Anmeldedaten: Benutzername = ClientID, Kennwort = Geheimer Clientschlüssel) übergeben. Die Abfrage läuft über die Sophos-Cloud. Ohne -Anmeldedaten werden ClientID und Clientschlüssel abgefragt.
 
 VORAUSSETZUNGEN
 - API-Zugangsdaten in Sophos Central angelegt: Sophos Central > Globale Einstellungen > API-Zugangsdatenverwaltung > Zugangsdaten hinzufügen
@@ -27,8 +38,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
@@ -43,9 +56,20 @@ $MaxTageOffline = 7
 if (Test-Path $Datei) { Remove-Item $Datei -Force }
 
 # - ZUGANGSDATEN
-$clientId     = Read-Host "ClientID"
-$secureSecret = Read-Host "Geheimer Clientschlüssel" -AsSecureString
-$clientSecret = [System.Net.NetworkCredential]::new("", $secureSecret).Password
+$ZielName = if ([string]::IsNullOrWhiteSpace($Ziel)) { 'Sophos Central' } else { $Ziel.Trim() }
+if ($Anmeldedaten) {
+    $clientId     = $Anmeldedaten.UserName
+    $clientSecret = $Anmeldedaten.GetNetworkCredential().Password
+} elseif ($Automatik) {
+    Write-Host "Abbruch: Im Automatikmodus fehlt das Konto (ClientID als Benutzername, Clientschlüssel als Kennwort)." -ForegroundColor Red
+    Write-WtErgebnis -Skript '07.1-Firewall-Sophos_Central' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $ZielName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Kein Konto (ClientID/Clientschlüssel) hinterlegt' })
+    exit 1
+} else {
+    $clientId     = Read-Host "ClientID"
+    $secureSecret = Read-Host "Geheimer Clientschlüssel" -AsSecureString
+    $clientSecret = [System.Net.NetworkCredential]::new("", $secureSecret).Password
+}
+$tenantErgebnisse = [System.Collections.Generic.List[object]]::new()
 
 Add-Content $Datei "===== Sophos Central Kurzcheck ====="
 Add-Content $Datei "Ausgeführt von: $env:COMPUTERNAME"
@@ -100,6 +124,10 @@ try {
     Add-Content $Datei "LOGIN FEHLGESCHLAGEN: ClientID/Geheimen Clientschlüssel prüfen. Details: $($_.Exception.Message)"
     Write-Host "Login fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red
     Add-Content $Datei "`n===== Ende Sophos Central Kurzcheck ====="
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '07.1-Firewall-Sophos_Central' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $ZielName; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Login fehlgeschlagen (ClientID/Clientschlüssel prüfen)' })
+        exit 1
+    }
     Start-Process notepad.exe $Datei
     return
 }
@@ -136,17 +164,20 @@ foreach ($tenant in $tenants) {
 
     $tHeader = $authHeader + @{ "X-Tenant-ID" = $tenant.Id }
     $api     = $tenant.ApiHost
+    $tn = [ordered]@{ Mandant = [string]$tenant.Name }
 
     # --- 1. Endpoints ---
     Add-Content $Datei "`n--- Endpoints ---"
     try {
         $endpoints = Get-SophosPaged -Url "$api/endpoint/v1/endpoints?pageSize=500" -Headers $tHeader
         Add-Content $Datei "Endpoints gesamt: $($endpoints.Count)"
+        $tn['Endpoints'] = $endpoints.Count
 
         if ($endpoints.Count -eq 0) {
             Add-Content $Datei "Keine Endpoints in diesem Mandanten registriert."
         } else {
             $health = $endpoints | Where-Object { $_.health.overall -and $_.health.overall -ne "good" }
+            $tn['EndpointsHealthNichtGood'] = $health.Count
             if ($health.Count -gt 0) {
                 Add-Content $Datei "Endpoints mit Health-Status ungleich 'good': $($health.Count)"
                 foreach ($e in $health) {
@@ -157,6 +188,7 @@ foreach ($tenant in $tenants) {
             }
 
             $tamper = $endpoints | Where-Object { $_.tamperProtectionEnabled -eq $false }
+            $tn['EndpointsOhneTamperProtection'] = $tamper.Count
             if ($tamper.Count -gt 0) {
                 Add-Content $Datei "Endpoints ohne Tamper Protection: $($tamper.Count)"
                 foreach ($e in $tamper) { Add-Content $Datei "  $($e.hostname)" }
@@ -166,6 +198,7 @@ foreach ($tenant in $tenants) {
 
             $grenze  = (Get-Date).AddDays(-$MaxTageOffline)
             $offline = $endpoints | Where-Object { $_.lastSeenAt -and ([datetime]$_.lastSeenAt) -lt $grenze }
+            $tn['EndpointsOffline'] = $offline.Count
             if ($offline.Count -gt 0) {
                 Add-Content $Datei "Endpoints seit mehr als $MaxTageOffline Tagen nicht gesehen: $($offline.Count)"
                 foreach ($e in $offline) {
@@ -183,6 +216,7 @@ foreach ($tenant in $tenants) {
     Add-Content $Datei "`n--- Alerts ---"
     try {
         $alerts = Get-SophosPaged -Url "$api/common/v1/alerts?pageSize=100" -Headers $tHeader
+        $tn['OffeneAlerts'] = $alerts.Count
         if ($alerts.Count -gt 0) {
             Add-Content $Datei "Offene Alerts: $($alerts.Count)"
             foreach ($a in ($alerts | Sort-Object raisedAt -Descending)) {
@@ -199,6 +233,7 @@ foreach ($tenant in $tenants) {
     Add-Content $Datei "`n--- Firewalls ---"
     try {
         $fws = Get-SophosPaged -Url "$api/firewall/v1/firewalls?pageSize=100" -Headers $tHeader
+        $tn['Firewalls'] = @($fws | ForEach-Object { [pscustomobject]@{ Name = $(if ($_.name) { [string]$_.name } else { [string]$_.hostname }); Modell = [string]$_.model; Firmware = [string]$_.firmwareVersion; Verbunden = $_.status.connected } })
         if ($fws.Count -gt 0) {
             Add-Content $Datei "Firewalls gesamt: $($fws.Count)"
             foreach ($f in $fws) {
@@ -227,9 +262,23 @@ foreach ($tenant in $tenants) {
     } catch {
         Add-Content $Datei "Fehler beim Abruf der Lizenzen: $($_.Exception.Message)"
     }
+    $tenantErgebnisse.Add([pscustomobject]$tn)
 }
 
 # - ABSCHLUSS
 Add-Content $Datei "`n===== Ende Sophos Central Kurzcheck ====="
 Write-Host ("`nSophos Central Kurzcheck abgeschlossen. Datei gespeichert unter: {0}" -f $Datei) -ForegroundColor Yellow
+
+if ($Automatik) {
+    Get-Content -LiteralPath $Datei | Write-Host
+    ## Haken nur für den erfolgreichen Abruf (Berichte aus Sophos Central); Firmware und Konfigurationssicherung der Firewall sind hier nicht belegt
+    $pr = [ordered]@{}
+    if ($tenants.Count -gt 0) { $pr['CentralBerichteGeprueft'] = $true }
+    $notiz = "$($tenants.Count) Mandant(en) geprüft"
+    $alertSumme = (@($tenantErgebnisse | Where-Object { $_.PSObject.Properties.Name -contains 'OffeneAlerts' }) | Measure-Object -Property OffeneAlerts -Sum).Sum
+    if ($alertSumme -gt 0) { $notiz += "; $alertSumme offene Alerts" }
+    Write-WtErgebnis -Skript '07.1-Firewall-Sophos_Central' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $ZielName; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]@{ Mandanten = $tenantErgebnisse.ToArray() }; Notiz = $notiz })
+    exit 0
+}
+
 Start-Process notepad.exe $Datei

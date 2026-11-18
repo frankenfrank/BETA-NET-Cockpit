@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-08.2-Switche-Huawei ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,13 +38,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Switche) nötig." -ForegroundColor Red
+    exit 1
+}
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -56,6 +71,7 @@ function Get-ZielAnmeldung {
         $c = Get-ZielKonto -Name $Name
         if ($c) { return $c }
     }
+    if ($Automatik) { return $null }
     return (Get-Credential -Message $Meldung)
 }
 
@@ -103,6 +119,7 @@ else {
 }
 if ($ips.Count -eq 0) {
     Write-Host "→ Keine Switch-IP-Adressen hinterlegt – Abschnitt wird übersprungen."
+    if ($Automatik) { exit 1 }
     return
 }
 
@@ -381,6 +398,13 @@ function Get-PortVlanSummary {
 
 # - HAUPTAUSFÜHRUNG
 $details = @()
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
+
+## Gerät nicht erreichbar bzw. Abfrage fehlgeschlagen: Ergebnis ohne Haken
+function Add-SwFehler {
+    param([string]$Ziel, [string]$Notiz)
+    $ergebnisListe.Add([pscustomobject]@{ Ziel = $Ziel; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = $Notiz })
+}
 
 $SSHPort = 22
 
@@ -391,6 +415,7 @@ foreach ($ip in $ips) {
     if (-not (Test-Connection -ComputerName $ip -Count 1 -Quiet)) {
         Write-Host "STATUS          : Nicht erreichbar (Ping fehlgeschlagen)" -ForegroundColor Red
         $details += "HOST: $ip - FEHLER: Nicht erreichbar (Ping fehlgeschlagen)"
+        Add-SwFehler -Ziel $ip -Notiz 'Nicht erreichbar (Ping fehlgeschlagen)'
         continue
     }
 
@@ -399,6 +424,7 @@ foreach ($ip in $ips) {
     if (-not $portCheck) {
         Write-Host "STATUS          : Ping OK, SSH-Port $SSHPort nicht erreichbar" -ForegroundColor Red
         $details += "HOST: $ip - FEHLER: Ping OK, SSH-Port $SSHPort nicht erreichbar"
+        Add-SwFehler -Ziel $ip -Notiz "SSH-Port $SSHPort nicht erreichbar"
         continue
     }
 
@@ -422,6 +448,7 @@ foreach ($ip in $ips) {
     if (-not $session) {
         Write-Host "STATUS          : SSH-Verbindung fehlgeschlagen (Login/Auth)" -ForegroundColor Red
         $details += "HOST: $ip - FEHLER: SSH-Login fehlgeschlagen: $loginFehler"
+        Add-SwFehler -Ziel $ip -Notiz 'SSH-Anmeldung fehlgeschlagen'
         continue
     }
 
@@ -430,6 +457,7 @@ foreach ($ip in $ips) {
     } catch {
         Write-Host "STATUS          : Shell-Stream konnte nicht geoeffnet werden" -ForegroundColor Red
         $details += "HOST: $ip - FEHLER: Shell-Stream fehlgeschlagen: $($_.Exception.Message)"
+        Add-SwFehler -Ziel $ip -Notiz 'Shell-Stream konnte nicht geöffnet werden'
         Remove-SSHSession -SSHSession $session | Out-Null
         continue
     }
@@ -527,6 +555,20 @@ foreach ($ip in $ips) {
     $details += "-------------------------------------------------------------"
     $details += "LOGAUSZUG (nur Warnung und kritisch, letzte 30 Tage):"
     $details += Get-FilteredSwitchLog -LogText $logText -Days 30
+
+    ## Ergebnis für die Checkliste: Haken nur für die Konfigurationssicherung (Konfiguration vollständig gesichert); Firmware-Aktualität und VLAN sind per CLI nicht belegbar
+    $pr = [ordered]@{ KonfigSicherung = [bool]$backupOk }
+    $vrp = if ($verText -match '(?m)^\s*VRP.*?Version\s+(?<v>.+?)\s*$') { $Matches['v'] } else { $null }
+    $ifKurz = (Get-InterfaceSummary -Text $ifStatusText -split '\r?\n' | Select-Object -First 1)
+    $werte = [ordered]@{
+        Switchname   = $switchName
+        Version      = $vrp
+        Ports        = $ifKurz
+        TemperaturRoh = @((Format-SwitchOutput -Text $tempText -Command "display temperature all") -split '\r?\n')
+    }
+    $notizSw = $(if ($backupOk) { 'Konfigsicherung erstellt' } else { 'Konfigsicherung evtl. unvollständig' })
+    if ($ifKurz) { $notizSw += "; $ifKurz" }
+    $ergebnisListe.Add([pscustomobject]@{ Ziel = $ip; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notizSw })
 }
 
 # - LOGDATEI SCHREIBEN
@@ -535,5 +577,11 @@ Write-Host "`nLogdatei gespeichert unter: $LogFile" -ForegroundColor Cyan
 $details | Out-File -FilePath $LogFile -Encoding utf8
 
 # - DATEI ÖFFNEN
+if ($Automatik) {
+    $details | Write-Host
+    Write-WtErgebnis -Skript '08.2-Switche-Huawei' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
 Invoke-Item $LogFile
 Write-Host "`nFertig."

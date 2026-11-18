@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-05.1-Virtualisierung_Hyper-V ===" -ForegroundColor Cyan
 Write-Host ""
@@ -30,13 +39,20 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Hosts) nötig." -ForegroundColor Red
+    exit 1
+}
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -106,6 +122,7 @@ $RemoteBlock = {
     param($Kunde)
 
     $Server = $env:COMPUTERNAME
+    $k = [ordered]@{}
     $Datum = Get-Date -Format "yyyyMMdd"
     if (-not (Test-Path 'C:\Temp')) { New-Item -ItemType Directory -Path 'C:\Temp' | Out-Null }
     $TempFile = "C:\Temp\Wartungslog_HyperV_${Server}_$Datum.txt"
@@ -129,7 +146,11 @@ Add-Content $TempFile ""
     Add-Content $TempFile "===== 1. Hyper-V Replikation ====="
     try {
         $replications = Get-VMReplication | Select-Object VMName, State, Health, LastReplicationTime, ReplicationMode
-        if ($replications) { $replications | Format-Table -AutoSize | Out-String | Add-Content $TempFile }
+        if ($replications) {
+            $replications | Format-Table -AutoSize | Out-String | Add-Content $TempFile
+            $k.Replikationen = @($replications).Count
+            $k.ReplikationOk = (@($replications | Where-Object { [string]$_.Health -ne 'Normal' }).Count -eq 0)
+        }
         else { Add-Content $TempFile "Keine Replikationen konfiguriert." }
     } catch { Add-Content $TempFile "Fehler beim Abruf der Replikationsdaten: $($_.Exception.Message)" }
 
@@ -140,6 +161,8 @@ Add-Content $TempFile ""
             $cluster = Get-Cluster
             $groups = Get-ClusterGroup | Select-Object Name, State, OwnerNode
             Add-Content $TempFile "Clustername: $($cluster.Name)"
+            $k.ClusterName = [string]$cluster.Name
+            $k.ClusterOk = (@($groups | Where-Object { [string]$_.State -ne 'Online' }).Count -eq 0)
             $groups | Format-Table -AutoSize | Out-String | Add-Content $TempFile
         } else {
             Add-Content $TempFile "Kein Cluster erkannt oder Cmdlet nicht verfügbar."
@@ -150,7 +173,12 @@ Add-Content $TempFile ""
     Add-Content $TempFile "===== 3. Virtuelle Maschinen ====="
     try {
         $vms = Get-VM | Select-Object Name, State, Uptime, Status
-        if ($vms) { $vms | Format-Table -AutoSize | Out-String | Add-Content $TempFile }
+        if ($vms) {
+            $vms | Format-Table -AutoSize | Out-String | Add-Content $TempFile
+            $k.VmsGesamt = @($vms).Count
+            $k.VmsNichtLaufend = @($vms | Where-Object { [string]$_.State -ne 'Running' } | ForEach-Object { [string]$_.Name })
+            $k.VmsLaufen = ($k.VmsNichtLaufend.Count -eq 0)
+        }
         else { Add-Content $TempFile "Keine VMs gefunden." }
     } catch { Add-Content $TempFile "Fehler beim Abruf der VM-Daten: $($_.Exception.Message)" }
 
@@ -159,6 +187,8 @@ Add-Content $TempFile ""
     try {
         $volumes = Get-Volume | Where-Object { $_.DriveLetter } | Select-Object DriveLetter, FileSystemLabel, SizeRemaining, Size, @{Name="FreePercent";Expression={[math]::Round(($_.SizeRemaining / $_.Size) * 100,2)}}
         $volumes | Format-Table -AutoSize | Out-String | Add-Content $TempFile
+        $k.Speicherplatz = @($volumes | ForEach-Object { [pscustomobject]@{ Laufwerk = "$($_.DriveLetter):"; FreiGB = [math]::Round($_.SizeRemaining / 1GB, 1); GroesseGB = [math]::Round($_.Size / 1GB, 1); FreiProzent = [double]$_.FreePercent } })
+        $k.SpeicherplatzOk = (@($volumes | Where-Object { $_.FreePercent -lt 10 }).Count -eq 0)
     } catch { Add-Content $TempFile "Fehler beim Abruf der Speicherinformationen: $($_.Exception.Message)" }
 
     Add-Content $TempFile ""
@@ -168,7 +198,12 @@ Add-Content $TempFile ""
             $vm = $_.Name
             Get-VMIntegrationService -VMName $vm | Select-Object VMName, Name, PrimaryStatusDescription
         }
-        if ($integrations) { $integrations | Format-Table -AutoSize | Out-String | Add-Content $TempFile }
+        if ($integrations) {
+            $integrations | Format-Table -AutoSize | Out-String | Add-Content $TempFile
+            $intFehler = @($integrations | Where-Object { $_.PrimaryStatusDescription -and [string]$_.PrimaryStatusDescription -ne 'OK' } | ForEach-Object { "$($_.VMName): $($_.Name)" })
+            $k.IntegrationsdiensteFehler = $intFehler
+            $k.IntegrationsdiensteOk = ($intFehler.Count -eq 0)
+        }
         else { Add-Content $TempFile "Keine Integrationsdienste gefunden." }
     } catch { Add-Content $TempFile "Fehler beim Abruf der Integrationsdienste: $($_.Exception.Message)" }
 
@@ -181,13 +216,15 @@ Add-Content $TempFile ""
         }
         if ($snapshots) { $snapshots | Format-Table -AutoSize | Out-String | Add-Content $TempFile }
         else { Add-Content $TempFile "Keine Snapshots vorhanden." }
+        $k.Snapshots = @($snapshots | ForEach-Object { "$($_.VMName): $($_.Name)" })
+        $k.KeineSnapshots = (@($snapshots).Count -eq 0)
     } catch { Add-Content $TempFile "Fehler beim Abruf der Snapshot-Informationen: $($_.Exception.Message)" }
 
     Add-Content $TempFile ""
     Add-Content $TempFile "=== ENDE DER HYPER-V-WARTUNGSDATEN ==="
     Add-Content $TempFile "#WARTUNG_EVENTLOG_ENDE"
 
-    Get-Content $TempFile
+    [pscustomobject]@{ Text = @(Get-Content $TempFile); Kennzahlen = [pscustomobject]$k }
 }
 
 # - REMOTE AUSFÜHRUNG AUF ALLEN HOSTS
@@ -204,7 +241,7 @@ foreach ($srv in $Serverliste) {
             }
             catch {
                 $anmeldung = $_.Exception.Message -match "Zugriff verweigert|Access is denied|0x80070005|Anmeldefehler|logon failure|Benutzername oder Kennwort|user name or password"
-                if ($versuch -eq 1 -and $anmeldung) {
+                if ($versuch -eq 1 -and $anmeldung -and -not $Automatik) {
                     Write-Host "   Anmeldung an $srv fehlgeschlagen - Zugangsdaten abfragen" -ForegroundColor Yellow
                     $neu = Get-Credential -Message "Zugangsdaten für $srv"
                     if ($neu) { $script:AnmeldedatenHost[$srv] = $neu; continue }
@@ -213,13 +250,40 @@ foreach ($srv in $Serverliste) {
             }
         }
         Add-Content $AusgabeDatei "`n===== $srv =====`n"
-        Add-Content $AusgabeDatei $result
+        Add-Content $AusgabeDatei $result.Text
         Write-Host "   ✓ Erfolgreich abgefragt" -ForegroundColor Green
+
+        # - ERGEBNIS FÜR DIE CHECKLISTE (Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+        $kz = $result.Kennzahlen
+        $pr = [ordered]@{}
+        foreach ($n in 'ReplikationOk', 'ClusterOk', 'VmsLaufen', 'SpeicherplatzOk', 'IntegrationsdiensteOk', 'KeineSnapshots') {
+            if ($null -ne $kz.$n) { $pr[$n] = [bool]$kz.$n }
+        }
+        $probleme = @()
+        if ($pr['ReplikationOk'] -eq $false) { $probleme += 'Replikation nicht normal' }
+        if ($pr['ClusterOk'] -eq $false) { $probleme += 'Cluster-Gruppe nicht online' }
+        if ($pr['VmsLaufen'] -eq $false) { $probleme += "VMs nicht laufend: $(@($kz.VmsNichtLaufend) -join ', ')" }
+        if ($pr['SpeicherplatzOk'] -eq $false) { $probleme += 'Speicherplatz unter 10 % frei' }
+        if ($pr['IntegrationsdiensteOk'] -eq $false) { $probleme += "Integrationsdienste auffällig: $(@($kz.IntegrationsdiensteFehler) -join ', ')" }
+        if ($pr['KeineSnapshots'] -eq $false) { $probleme += "Snapshots vorhanden: $(@($kz.Snapshots) -join ', ')" }
+        $ergebnisListe.Add([pscustomobject]@{
+            Ziel = $srv; Erreicht = $true
+            Pruefungen = [pscustomobject]$pr
+            Werte = [pscustomobject]@{ Replikationen = $kz.Replikationen; ClusterName = $kz.ClusterName; VmsGesamt = $kz.VmsGesamt; Speicherplatz = @($kz.Speicherplatz) }
+            Notiz = ($probleme -join '; ')
+        })
     } catch {
         Write-Host "Fehler bei ${srv}: $($_.Exception.Message)" -ForegroundColor Red
         Add-Content $AusgabeDatei "`n===== $srv =====`nFehler bei der Remote-Abfrage: $($_.Exception.Message)`n"
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $srv; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Remote-Abfrage fehlgeschlagen' })
     }
 }
 
 Write-Host "`nFertig. Ergebnisse in $AusgabeDatei" -ForegroundColor Green
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '05.1-Virtualisierung_Hyper-V' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    exit $(if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -gt 0) { 0 } else { 1 })
+}
+
 Start-Process notepad.exe $AusgabeDatei

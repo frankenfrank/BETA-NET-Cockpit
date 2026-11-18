@@ -5,10 +5,19 @@ param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
     [System.Management.Automation.PSCredential]$Anmeldedaten,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== $($MyInvocation.MyCommand.Name) ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,8 +38,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
@@ -38,6 +49,10 @@ if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -
 
 # - SERVERLISTE
 $NASListe = @($Ziel | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne "" })
+if ($Automatik -and $NASListe.Count -eq 0) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (NAS) nötig." -ForegroundColor Red
+    exit 1
+}
 if ($NASListe.Count -gt 0) {
     Write-Host "`
 Zu prüfende NAS (aus dem NET-COCKPIT):"
@@ -116,10 +131,27 @@ function Get-MdBlock {
 }
 
 $Zusammenfassung = @()
+$ErgebnisExtra = @{}
+
+## Größenangabe aus df -h (z. B. 3.6T, 512G) in GB
+function ConvertTo-Gb {
+    param([string]$Text)
+    if ($Text -notmatch '^(?<n>[\d.,]+)(?<u>[KMGTP]?)') { return $null }
+    $n = [double]::Parse(($Matches['n'] -replace ',', '.'), [System.Globalization.CultureInfo]::InvariantCulture)
+    switch ($Matches['u']) {
+        'K' { return [math]::Round($n / 1MB, 2) }
+        'M' { return [math]::Round($n / 1KB, 2) }
+        'T' { return [math]::Round($n * 1KB, 1) }
+        'P' { return [math]::Round($n * 1MB, 1) }
+        default { return [math]::Round($n, 1) }
+    }
+}
 
 foreach ($NAS in $NASListe) {
     Write-Host "`n===== NAS: $NAS ====="
 
+    $raidOk = $null
+    $volWerte = @()
     $summary = [ordered]@{
         NAS      = $NAS
         Name     = ""
@@ -154,6 +186,7 @@ foreach ($NAS in $NASListe) {
     $MaxVersuche = 3
     $sid = $null
     for ($Versuch = 1; $Versuch -le $MaxVersuche; $Versuch++) {
+        if (($Versuch -gt 1 -or -not $cred) -and $Automatik) { break }
         if ($Versuch -gt 1 -or -not $cred) {
             $cred = Get-Credential -Message "Zugangsdaten fuer NAS: $NAS (Versuch $Versuch/$MaxVersuche)"
         }
@@ -205,6 +238,8 @@ foreach ($NAS in $NASListe) {
         } else {
             $summary.RAID_md1 = "Status nicht auslesbar (md1 nicht gefunden)"
         }
+        $raidOk = $null
+        if ($summary.RAID_md1 -match '^(?<a>\d+)/(?<b>\d+) U+$') { $raidOk = ($Matches['a'] -eq $Matches['b']) }
 
         Write-Host "`n--- SPEICHERPLATZ (RAW df -h) ---"
         $dfRaw = ConvertTo-Lines (Invoke-SSHCommand -SessionId $sid -Command "df -h").Output
@@ -230,6 +265,12 @@ foreach ($NAS in $NASListe) {
 
         # nur die eigentliche(n) Daten-Freigabe(n), keine tmpfs/.quftp/lock-Mounts
         $shareZeilen = $dfMerged | Where-Object { $_ -match '^/dev/\S+.*\s/share/CACHEDEV\d+_DATA\s*$' }
+        $volWerte = @()
+        foreach ($z in @($shareZeilen)) {
+            if ($z -match '^\S+\s+(?<size>\S+)\s+(?<used>\S+)\s+(?<avail>\S+)\s+(?<pct>\d+)%\s+(?<mnt>/share/\S+)\s*$') {
+                $volWerte += [pscustomobject]@{ Laufwerk = $Matches['mnt']; FreiGB = (ConvertTo-Gb $Matches['avail']); GroesseGB = (ConvertTo-Gb $Matches['size']); FreiProzent = (100 - [int]$Matches['pct']) }
+            }
+        }
         $summary.Speicher = if ($shareZeilen) { ($shareZeilen -join ' ; ') } else { "keine CACHEDEV_DATA-Zeile gefunden, siehe Logdatei" }
 
         Write-Host "`n--- DISK-LISTE (RAW qcli_storage) ---"
@@ -272,6 +313,7 @@ foreach ($NAS in $NASListe) {
         }
 
         $summary.SMART = $diskStatusListe -join ' | '
+        $ErgebnisExtra[$NAS] = @{ RaidOk = $raidOk; Disks = @($diskStatusListe); Vol = @($volWerte) }
     }
     catch {
         Write-Host "STATUS          : Fehler beim Abfragen der NAS-Daten"
@@ -300,4 +342,38 @@ foreach ($s in $Zusammenfassung) {
 }
 
 Write-Host "`n`nErgebnisdatei: $AusgabeDatei"
+
+if ($Automatik) {
+    # - ERGEBNIS FÜR DIE CHECKLISTE (Haken nur bei belegter Aussage; die Firmware-Aktualität ist per SSH nicht belegbar und bekommt keinen Haken)
+    $ergebnisListe = foreach ($s in $Zusammenfassung) {
+        $extra = $ErgebnisExtra[[string]$s.NAS]
+        if ($s.Status -ne 'OK' -or -not $extra) {
+            [pscustomobject]@{ Ziel = [string]$s.NAS; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = [string]$s.Status }
+            continue
+        }
+        $pr = [ordered]@{}
+        $probleme = @()
+        $diskBad = @($extra.Disks | Where-Object {
+            $_ -match '(?i)warn|fail|error|bad|critical|abnormal|nicht auslesbar' -or
+            ($_ -match 'CritWarning\)=(?<cw>\S+)' -and $Matches['cw'] -notmatch '^(0|0x0+)$')
+        })
+        if ($null -ne $extra.RaidOk -and $extra.Disks.Count -gt 0) {
+            $pr['RaidHdd'] = ($extra.RaidOk -and $diskBad.Count -eq 0)
+            if (-not $extra.RaidOk) { $probleme += "RAID md1: $($s.RAID_md1)" }
+            if ($diskBad.Count -gt 0) { $probleme += "Datenträger auffällig: $($diskBad -join ', ')" }
+        }
+        if ($extra.Vol.Count -gt 0) {
+            $pr['SpeicherplatzOk'] = (@($extra.Vol | Where-Object { $_.FreiProzent -lt 10 }).Count -eq 0)
+            if (-not $pr['SpeicherplatzOk']) { $probleme += 'Volume unter 10 % frei' }
+        }
+        $werte = [ordered]@{ Name = [string]$s.Name; Firmware = [string]$s.Firmware; Build = [string]$s.Build; Raid = [string]$s.RAID_md1; Datentraeger = $extra.Disks; Speicherplatz = $extra.Vol }
+        $notiz = "Firmware $($s.Firmware) (Build $($s.Build))"
+        if ($probleme.Count -gt 0) { $notiz += '; ' + ($probleme -join '; ') }
+        [pscustomobject]@{ Ziel = [string]$s.NAS; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notiz }
+    }
+    Write-WtErgebnis -Skript '08.4-NAS-QNAP' -Ordner $Ausgabepfad -Ergebnisse @($ergebnisListe)
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Invoke-Item -LiteralPath $AusgabeDatei

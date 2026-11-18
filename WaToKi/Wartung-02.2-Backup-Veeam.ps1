@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [System.Management.Automation.PSCredential]$Anmeldedaten
+    [System.Management.Automation.PSCredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-02.2-BackupVeeam ===" -ForegroundColor Cyan
 Write-Host ""
@@ -28,13 +37,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - EINGABE VEEAM-SERVER
-Clear-Host
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 $veeamServer = "$Ziel".Trim()
+if ($Automatik -and [string]::IsNullOrWhiteSpace($veeamServer)) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Veeam-Server) nötig." -ForegroundColor Red
+    exit 1
+}
 if ([string]::IsNullOrWhiteSpace($veeamServer)) {
     do {
         $veeamServer = (Read-Host "Auf welchem Server läuft Veeam Backup & Replication? Bitte den Servernamen eingeben").Trim()
@@ -68,6 +83,10 @@ if (-not $istLokal) {
         Write-Host ""
         Write-Host "Abbruch: $veeamServer ist per WinRM nicht erreichbar (Servername falsch, Server aus, Firewall oder WinRM nicht aktiv)." -ForegroundColor Red
         Write-Host ""
+        if ($Automatik) {
+            Write-WtErgebnis -Skript '02.2-Backup-Veeam' -Ordner $targetFolder -Ergebnisse @([pscustomobject]@{ Ziel = $veeamServer; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'per WinRM nicht erreichbar' })
+            exit 1
+        }
         Read-Host "Mit [Enter] beenden" | Out-Null
         return
     }
@@ -88,6 +107,9 @@ $scriptBlock = {
     $ergebnis = [PSCustomObject]@{
         Fehler = $null
         Zeilen = @()
+        Sitzungen = 0
+        NichtErfolgreich = 0
+        Auffaellig = @()
     }
 
     # -- MODUL PRÜFEN
@@ -107,6 +129,12 @@ $scriptBlock = {
         $ergebnis.Fehler = $_.Exception.Message
         return $ergebnis
     }
+
+    # -- KENNZAHLEN FÜR DIE CHECKLISTE
+    $ergebnis.Sitzungen = @($sessions).Count
+    $nichtErfolgreich = @($sessions | Where-Object { [string]$_.Result -ne 'Success' })
+    $ergebnis.NichtErfolgreich = $nichtErfolgreich.Count
+    $ergebnis.Auffaellig = @($nichtErfolgreich | ForEach-Object { [string]$_.JobName } | Sort-Object -Unique | Select-Object -First 5)
 
     # -- ZEILEN AUFBAUEN
     $zeilen = [System.Collections.Generic.List[string]]::new()
@@ -260,6 +288,10 @@ if ($null -eq $ergebnis) {
         Write-Host $eintrag -ForegroundColor Red
     }
     Write-Host ""
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '02.2-Backup-Veeam' -Ordner $targetFolder -Ergebnisse @([pscustomobject]@{ Ziel = $veeamServer; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Abfrage fehlgeschlagen' })
+        exit 1
+    }
     Read-Host "Mit [Enter] beenden" | Out-Null
     return
 }
@@ -270,6 +302,23 @@ $ergebnis.Zeilen | Out-File -FilePath $targetFile -Encoding utf8
 # - FERTIG MELDUNG
 Write-Host "Export abgeschlossen." -ForegroundColor Green
 Write-Host "Datei gespeichert unter: $targetFile" -ForegroundColor Cyan
+
+# - ERGEBNIS FÜR DIE CHECKLISTE
+if ($Automatik) {
+    $sitzungen = [int]$ergebnis.Sitzungen
+    $nicht = [int]$ergebnis.NichtErfolgreich
+    ### Haken (geprüft) nur, wenn es Sitzungen gibt und alle der letzten 30 Tage erfolgreich waren; ohne Sitzungen ist es unbekannt
+    $backupOk = $(if ($sitzungen -gt 0) { $nicht -eq 0 } else { $null })
+    $notiz = $(if ($sitzungen -eq 0) { 'keine Backup-Sitzungen in den letzten 30 Tagen' } elseif ($nicht -gt 0) { "$nicht von $sitzungen Sitzungen nicht erfolgreich: $(@($ergebnis.Auffaellig) -join ', ')" } else { '' })
+    Write-WtErgebnis -Skript '02.2-Backup-Veeam' -Ordner $targetFolder -Ergebnisse @([pscustomobject]@{
+        Ziel = $veeamServer; Erreicht = $true
+        Pruefungen = [pscustomobject]@{ BackupErfolgreich = $backupOk }
+        Werte = [pscustomobject]@{ Sitzungen30Tage = $sitzungen; NichtErfolgreich = $nicht; AuffaelligeJobs = @($ergebnis.Auffaellig) }
+        Notiz = $notiz
+    })
+    exit 0
+}
+
 Write-Host "Logdatei wird geöffnet ..." -ForegroundColor Green
 
 # - DATEI ÖFFNEN

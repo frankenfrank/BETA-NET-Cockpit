@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-05.1-Virtualisierung_ESXi ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,13 +38,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (vCenter bzw. ESXi-Hosts) nötig." -ForegroundColor Red
+    exit 1
+}
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -142,6 +157,7 @@ foreach ($ZielServer in $VCServer) {
         $Versuch++
         $Cred = $null
         if ($Versuch -eq 1) { $Cred = Get-ZielKonto -Name $ZielServer }
+        if (-not $Cred -and $Automatik) { break }
         if (-not $Cred) {
             $userParam = if ($DefaultUser) { @{ UserName = $DefaultUser } } else { @{} }
             $Cred = Get-Credential @userParam -Message "Anmeldung an $ZielServer (Versuch $Versuch von $MaxVersuche)"
@@ -163,6 +179,10 @@ foreach ($ZielServer in $VCServer) {
 if ($VerbundeneServer.Count -eq 0) {
     Write-Host ""
     Write-Host "Keine Verbindung zu einem Server möglich. Script wird beendet." -ForegroundColor Red
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '05.1-Virtualisierung_ESXi' -Ordner $Ausgabepfad -Ergebnisse @($VCServer | ForEach-Object { [pscustomobject]@{ Ziel = $_; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Verbindung oder Anmeldung fehlgeschlagen' } })
+        exit 1
+    }
     Read-Host "Mit Enter beenden"
     exit
 }
@@ -311,6 +331,43 @@ try {
     Add-Content $AusgabeDatei "Fehler beim Abruf der Snapshot-Informationen: $($_.Exception.Message)"
 }
 
+# - ERGEBNIS FÜR DIE CHECKLISTE (je verbundenem Server; Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
+foreach ($srv in $VCServer) {
+    if ($srv -notin $VerbundeneServer) {
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $srv; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Verbindung oder Anmeldung fehlgeschlagen' })
+        continue
+    }
+    $pr = [ordered]@{}
+    $probleme = @()
+    $werte = [ordered]@{ Hostname = [string]$HostNamen[$srv] }
+    try {
+        $hostsSrv = @(Get-VMHost -Server $srv -ErrorAction Stop)
+        $pr['HostsVerbunden'] = (@($hostsSrv | Where-Object { [string]$_.ConnectionState -ne 'Connected' }).Count -eq 0)
+        if (-not $pr['HostsVerbunden']) { $probleme += 'Host nicht verbunden' }
+    } catch { }
+    try {
+        $vmsSrv = @(Get-VM -Server $srv -ErrorAction Stop)
+        $nichtAn = @($vmsSrv | Where-Object { [string]$_.PowerState -ne 'PoweredOn' } | ForEach-Object { [string]$_.Name })
+        $pr['VmsLaufen'] = ($nichtAn.Count -eq 0)
+        if ($nichtAn.Count -gt 0) { $probleme += "VMs nicht eingeschaltet: $($nichtAn -join ', ')" }
+        $toolsFehler = @($vmsSrv | Where-Object { [string]$_.PowerState -eq 'PoweredOn' -and [string]$_.ExtensionData.Guest.ToolsStatus -ne 'toolsOk' } | ForEach-Object { [string]$_.Name })
+        $pr['VmwareToolsOk'] = ($toolsFehler.Count -eq 0)
+        if ($toolsFehler.Count -gt 0) { $probleme += "VMware Tools auffällig: $($toolsFehler -join ', ')" }
+        $werte['VmsGesamt'] = $vmsSrv.Count
+        $snapSrv = @($vmsSrv | Get-Snapshot -ErrorAction SilentlyContinue)
+        $pr['KeineSnapshots'] = ($snapSrv.Count -eq 0)
+        if ($snapSrv.Count -gt 0) { $probleme += "Snapshots vorhanden: $(@($snapSrv | ForEach-Object { "$($_.VM): $($_.Name)" }) -join ', ')" }
+    } catch { }
+    try {
+        $dsSrv = @(Get-Datastore -Server $srv -ErrorAction Stop)
+        $werte['Speicherplatz'] = @($dsSrv | ForEach-Object { [pscustomobject]@{ Laufwerk = [string]$_.Name; FreiGB = [math]::Round($_.FreeSpaceGB, 1); GroesseGB = [math]::Round($_.CapacityGB, 1); FreiProzent = $(if ($_.CapacityGB -gt 0) { [math]::Round($_.FreeSpaceGB / $_.CapacityGB * 100, 1) } else { 0 }) } })
+        $pr['SpeicherplatzOk'] = (@($werte['Speicherplatz'] | Where-Object { $_.FreiProzent -lt 10 }).Count -eq 0)
+        if (-not $pr['SpeicherplatzOk']) { $probleme += 'Datastore unter 10 % frei' }
+    } catch { }
+    $ergebnisListe.Add([pscustomobject]@{ Ziel = $srv; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = ($probleme -join '; ') })
+}
+
 # - TRENNUNG UND ABSCHLUSS
 Disconnect-VIServer * -Confirm:$false | Out-Null
 Add-Content $AusgabeDatei ""
@@ -320,4 +377,10 @@ Add-Content $AusgabeDatei "#WARTUNG_EVENTLOG_ENDE"
 Write-Host ""
 Write-Host "Die Datei wurde gespeichert in $AusgabeDatei" -ForegroundColor Green
 Write-Host ""
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '05.1-Virtualisierung_ESXi' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    exit 0
+}
+
 Start-Process notepad.exe $AusgabeDatei

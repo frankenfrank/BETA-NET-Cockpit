@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [pscredential]$Anmeldedaten
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-07.1-Firewall-Fortigate ===" -ForegroundColor Cyan
 Write-Host ""
@@ -28,8 +37,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host "   FortiGate Security-Check" -ForegroundColor Cyan
@@ -47,6 +58,10 @@ if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
 }
 Import-Module Posh-SSH
 
+if ($Automatik -and [string]::IsNullOrWhiteSpace($Ziel)) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (FortiGate) nötig." -ForegroundColor Red
+    exit 1
+}
 $FortiGateIP = if ([string]::IsNullOrWhiteSpace($Ziel)) { Read-Host "IP-Adresse der Firewall" } else { $Ziel.Trim() }
 
 Write-Host ""
@@ -54,6 +69,7 @@ Write-Host "Verbinde mit $FortiGateIP ..." -ForegroundColor Yellow
 $cred = $Anmeldedaten
 $session = $null
 for ($versuch = 1; $versuch -le 3 -and -not $session; $versuch++) {
+    if (($versuch -gt 1 -or -not $cred) -and $Automatik) { break }
     if ($versuch -gt 1 -or -not $cred) {
         $cred = Get-Credential -Message "FortiGate SSH-Zugangsdaten ($FortiGateIP) (Versuch $versuch von 3)"
     }
@@ -66,6 +82,10 @@ for ($versuch = 1; $versuch -le 3 -and -not $session; $versuch++) {
 }
 if (-not $session) {
     Write-Host "Keine Verbindung zur FortiGate möglich. Skript wird beendet." -ForegroundColor Red
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '07.1-Firewall-Fortigate' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $FortiGateIP; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'SSH-Verbindung oder Anmeldung fehlgeschlagen' })
+        exit 1
+    }
     return
 }
 Write-Host "Verbunden." -ForegroundColor Green
@@ -230,5 +250,34 @@ foreach ($line in $summary) { Write-Host $line -ForegroundColor White }
 Write-Host ""
 Write-Host " Report gespeichert: $ReportPath" -ForegroundColor Green
 Write-Host "=======================================================" -ForegroundColor Cyan
+
+if ($Automatik) {
+    Get-Content -LiteralPath $ReportPath | Write-Host
+
+    # - ERGEBNIS FÜR DIE CHECKLISTE (Haken nur, was das Skript wirklich prüfen konnte; Ports und Konfigurationssicherung ohne Haken)
+    $pr = [ordered]@{}
+    $notizTeile = @()
+    if ($currentVersion) {
+        if ($newerVersions.Count -gt 0) {
+            $pr['FirmwareAktuell'] = $false
+            $notizTeile += "Firmware-Update verfügbar: $($newerVersions -join ', ')"
+        } elseif ($imageLinesFound -gt 0) {
+            $pr['FirmwareAktuell'] = $true
+        }
+    }
+    if ($ipsText -match '\d+\s+logs found') {
+        $pr['LogGeprueft'] = $true
+        if ($ipsCount -gt 0) { $notizTeile += "IPS-Log: $ipsCount erfolgreiche Angriffe (action=pass) in 30 Tagen" }
+    }
+    $notizTeile += "$($vipList.Count) VIP-Eintraege (offene Ports von extern), Relevanz manuell prüfen"
+    $werte = [ordered]@{
+        Firmware      = $(if ($currentVersion) { "v$currentVersion build$currentBuild" } else { $null })
+        FirmwareAntwort = $fwAnswer
+        IpsTreffer    = $ipsCount
+        Vips          = @($vipList | ForEach-Object { [pscustomobject]@{ Name = $_.Name; ExternIP = $_.ExternIP; ExternPort = $_.ExternPort; Protokoll = $_.Protokoll; ZielIP = $_.ZielIP; ZielPort = $_.ZielPort } })
+    }
+    Write-WtErgebnis -Skript '07.1-Firewall-Fortigate' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $FortiGateIP; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = ($notizTeile -join '; ') })
+    exit 0
+}
 
 Invoke-Item $ReportPath

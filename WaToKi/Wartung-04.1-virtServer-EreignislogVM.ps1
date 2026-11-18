@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-04.1-virtServer-EreignislogVM ===" -ForegroundColor Cyan
 Write-Host ""
@@ -41,13 +50,20 @@ $RolleLogMap ggf. anpassen.
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Server) nötig." -ForegroundColor Red
+    exit 1
+}
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -337,7 +353,7 @@ while ($Wiederholen) {
         elseif ($r.Status -eq "AnmeldungFehlgeschlagen") {
             Write-Host "  ${h}: Anmeldung fehlgeschlagen (Konto $kontoName) - $($r.Details)" -ForegroundColor Red
             Write-Host "  Weitere Prüfungen mit diesem Konto pausieren, um Kontosperrungen zu vermeiden." -ForegroundColor Yellow
-            $neu = Read-Host "  Anmeldedaten neu eingeben? (j/n)"
+            $neu = $(if ($Automatik) { 'n' } else { Read-Host "  Anmeldedaten neu eingeben? (j/n)" })
             if ($neu -eq "j") {
                 $c = Get-Credential -Message "Konto mit Admin-Rechten auf $h"
                 if ($c) {
@@ -358,10 +374,17 @@ $AnzahlOK = @($ZugriffErgebnis.Values | Where-Object { $_.Status -eq "OK" }).Cou
 Write-Host "`n$AnzahlOK von $($Serverliste.Count) Hosts erreichbar und angemeldet." -ForegroundColor Cyan
 if ($AnzahlOK -eq 0) {
     Write-Host "Keine Hosts verfügbar, Script wird beendet." -ForegroundColor Red
+    if ($Automatik) {
+        $nicht = foreach ($h in $Serverliste) { [pscustomobject]@{ Ziel = $h; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = "nicht geprüft: $($ZugriffErgebnis[$h].Status) $($ZugriffErgebnis[$h].Details)".Trim() } }
+        Write-WtErgebnis -Skript '04.1-virtServer-EreignislogVM' -Ordner $Ausgabepfad -Ergebnisse @($nicht)
+        exit 1
+    }
     return
 }
-Write-Host "Weiter mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Weiter mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 
 Write-Host " "
@@ -429,6 +452,7 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
             Add-Content $AusgabeDatei ""
             $FeaturesImBlock[$Server] = $null
             $ErreichbarImBlock[$Server] = $false
+            $ergebnisListe.Add([pscustomobject]@{ Ziel = $Server; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = "nicht geprüft: $Grund" })
             continue
         }
 
@@ -472,6 +496,8 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
 
         $alleEvents = @()
         $logFehler = @()
+        $gelesen = [System.Collections.Generic.List[string]]::new()
+        $ereignisse = @()
         $credParam = Get-CredParam -ComputerName $Server
 
         foreach ($log in $LogsFuerServer) {
@@ -484,14 +510,16 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
                     Level     = 1,2
                     StartTime = $Zeitraum
                 } -ErrorAction Stop |
-                Select-Object TimeCreated, Id, ProviderName, Message)
+                Select-Object TimeCreated, Id, ProviderName, Message, Level, LogName)
                 $logAnzahl = $logEvents.Count
                 $alleEvents += $logEvents
+                $gelesen.Add($log)
             }
             catch {
                 if ($_.FullyQualifiedErrorId -notmatch "NoMatchingEventsFound") {
                     $logFehler += "-- Fehler beim Abruf von Log '${log}': $($_.Exception.Message)"
                 }
+                else { $gelesen.Add($log) }
             }
             Write-Host (" {0} Ereignisse ({1:N0} s)" -f $logAnzahl, ((Get-Date) - $logStart).TotalSeconds) -ForegroundColor DarkGray
         }
@@ -511,10 +539,20 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
                     Id          = $e.Id
                     Provider    = $e.ProviderName
                     ShortMsg    = $short
+                    Level       = $e.Level
+                    LogName     = $e.LogName
                 }
             }
 
             $groups = $norm | Group-Object Id, Provider, ShortMsg
+
+            ### Checkliste: bis zu 10 schwerste/häufigste Ereignisse (Level 1 = kritisch vor 2 = Fehler, dann nach Häufigkeit)
+            $ereignisse = @($groups | ForEach-Object {
+                $f = $_.Group | Sort-Object TimeCreated | Select-Object -First 1
+                $kurz = [string]$f.ShortMsg
+                if ($kurz.Length -gt 160) { $kurz = $kurz.Substring(0, 160) + '...' }
+                [pscustomobject]@{ Level = [int]$f.Level; Anzahl = [int]$_.Count; Datum = $f.TimeCreated.ToString('dd.MM.yyyy'); Id = [int]$f.Id; Quelle = [string]$f.Provider; Log = [string]$f.LogName; Text = $kurz }
+            } | Sort-Object @{ Expression = 'Level'; Ascending = $true }, @{ Expression = 'Anzahl'; Descending = $true } | Select-Object -First 10)
 
             foreach ($grp in $groups) {
 
@@ -536,6 +574,39 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
         }
 
         Add-Content $AusgabeDatei ""
+
+        # - ERGEBNIS FÜR DIE CHECKLISTE (Haken = geprüft; unbekannt bleibt weg)
+        $pr = [ordered]@{}
+        if ($gelesen -contains 'Application') { $pr['Anwendung'] = $true }
+        if ($gelesen -contains 'System') { $pr['System'] = $true }
+        if ($gelesen -contains 'Directory Service') { $pr['ActiveDirectory'] = $true }
+        if ($gelesen -contains 'DNS Server') { $pr['DNS'] = $true }
+        if ($gelesen -contains 'Microsoft-Windows-Dhcp-Server/Operational') { $pr['DHCP'] = $true }
+        if ($gelesen -contains 'Microsoft-Windows-SMBServer/Operational') { $pr['Dateiserver'] = $true }
+        $speicher = @()
+        $notizTeile = @()
+        if ($Daten) {
+            $speicher = @($Daten.Disks | ForEach-Object {
+                $frei = [math]::Round($_.FreeSpace / 1GB, 1); $gr = [math]::Round($_.Size / 1GB, 1)
+                [pscustomobject]@{ Laufwerk = [string]$_.DeviceID; FreiGB = $frei; GroesseGB = $gr; FreiProzent = $(if ($_.Size -gt 0) { [math]::Round($_.FreeSpace / $_.Size * 100, 1) } else { 0 }) }
+            })
+            ### unter 10 % frei gilt als nicht in Ordnung; Dienste: Haken nur, wenn kein Autostart-Dienst gestoppt ist
+            $pr['Speicherplatz'] = (@($speicher | Where-Object { $_.FreiProzent -lt 10 }).Count -eq 0)
+            $pr['DiensteGestartet'] = (-not $Daten.Services)
+        }
+        else { $notizTeile += 'Grundinfo (Speicherplatz, Dienste) nicht verfügbar' }
+        if ($logFehler.Count -gt 0) { $notizTeile += "$($logFehler.Count) Log(s) nicht lesbar" }
+        $ergebnisListe.Add([pscustomobject]@{
+            Ziel = $Server; Erreicht = $true
+            Pruefungen = [pscustomobject]$pr
+            Werte = [pscustomobject]@{
+                Betriebssystem = $(if ($Daten) { "$($Daten.OSCaption) (Build $($Daten.OSBuild))" } else { '' })
+                Speicherplatz = $speicher
+                DiensteGestoppt = @($(if ($Daten -and $Daten.Services) { $Daten.Services | ForEach-Object { [string]$_.DisplayName } }))
+                Ereignisse = @($ereignisse)
+            }
+            Notiz = ($notizTeile -join '; ')
+        })
     }
 
     # Fußbereich
@@ -543,7 +614,7 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
     Add-Content $AusgabeDatei "=== ENDE DER EVENTLOG-DATEN ==="
     Add-Content $AusgabeDatei "# WARTUNG EVENTLOG ENDE"
 
-    Start-Process notepad.exe $AusgabeDatei
+    if (-not $Automatik) { Start-Process notepad.exe $AusgabeDatei }
 
     # - ROLLEN-ERGEBNISSE DES BLOCKS SAMMELN (AUSGABE ERFOLGT NACH ALLEN BLÖCKEN)
     $Ergebnisse = for ($j = 0; $j -lt $Block.Count; $j++) {
@@ -598,4 +669,9 @@ foreach ($z in $Zusammenfassung) {
     Write-Host ""
     $TabelleText = $TabelleTransponiert | Format-Table -Property $TabellenSpalten -AutoSize | Out-String -Width 250
     Write-Host $TabelleText
+}
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '04.1-virtServer-EreignislogVM' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    exit $(if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -gt 0) { 0 } else { 1 })
 }

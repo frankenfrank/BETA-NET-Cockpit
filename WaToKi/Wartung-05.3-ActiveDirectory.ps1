@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-05.3-ActiveDirectory ===" -ForegroundColor Cyan
 Write-Host ""
@@ -30,13 +39,20 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Domaincontroller) nötig." -ForegroundColor Red
+    exit 1
+}
+$dcErgebnisse = [System.Collections.Generic.List[object]]::new()
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -234,7 +250,12 @@ function Invoke-OnDC {
 
 # - Domain ermitteln
 if ($ZielModus) {
-    $Domain = Invoke-OnDC -ComputerName $AllDCs[0] -ScriptBlock { Import-Module ActiveDirectory; (Get-ADDomain).DNSRoot }
+    try {
+        $Domain = Invoke-OnDC -ComputerName $AllDCs[0] -ScriptBlock { Import-Module ActiveDirectory; (Get-ADDomain).DNSRoot }
+    } catch {
+        $Domain = $null
+        Write-Host "Domain konnte nicht ermittelt werden: $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
 else {
     $Domain = (Get-ADDomain).DNSRoot
@@ -308,6 +329,10 @@ foreach ($TargetDC in $AllDCs) {
     Add-Content $AusgabeDatei ""
 
     Write-Host "`nAbfrage auf ${TargetDC} wird ausgefuehrt..." -ForegroundColor Yellow
+    $prDc = [ordered]@{}
+    $werteDc = [ordered]@{}
+    $notizDc = @()
+    $dcErreicht = $false
 
      # -- DCDIAG
     Add-Content $AusgabeDatei "===== 1. DCDIAG ====="
@@ -319,6 +344,10 @@ foreach ($TargetDC in $AllDCs) {
             $dcdiag = dcdiag /s:$TargetDC /v | Out-String
         }
         Add-Content $AusgabeDatei $dcdiag
+        $dcErreicht = $true
+        $dcdiagFehler = @(($dcdiag -split "`r?`n") | Where-Object { $_ -match '(?i)(\bfailed test\b|nicht bestanden)' })
+        $prDc['DcdiagOk'] = ($dcdiagFehler.Count -eq 0)
+        if ($dcdiagFehler.Count -gt 0) { $notizDc += "DCDIAG: $($dcdiagFehler.Count) Test(s) nicht bestanden" }
     } catch {
         Add-Content $AusgabeDatei "Fehler beim Ausführen von DCDIAG: $($_.Exception.Message)"
     }
@@ -349,6 +378,8 @@ foreach ($TargetDC in $AllDCs) {
                 Select-Object Name, SamAccountName, LastLogonDate
         } -ArgumentList $OUFilter
 
+        $werteDc['InaktiveBenutzer'] = @($alteBenutzer).Count
+        $werteDc['InaktiveComputer'] = @($alteComputer).Count
         Add-Content $AusgabeDatei "Inaktive Benutzerkonten (>90 Tage ohne Anmeldung):"
         if ($alteBenutzer) { $alteBenutzer | Format-Table -AutoSize | Out-String | Add-Content $AusgabeDatei }
         else { Add-Content $AusgabeDatei "Keine inaktiven Benutzerkonten gefunden." }
@@ -404,8 +435,12 @@ foreach ($TargetDC in $AllDCs) {
 
         if ($stoppedServicesText -and $stoppedServicesText.Trim()) {
             Add-Content $AusgabeDatei $stoppedServicesText
+            $prDc['DiensteGestartet'] = $false
+            $werteDc['DiensteGestoppt'] = @(($stoppedServicesText -split "`r?`n") | Where-Object { $_.Trim() -and $_ -notmatch '^(Status|-{3,})' } | ForEach-Object { $_.Trim() })
+            $notizDc += 'Automatische Dienste gestoppt'
         } else {
             Add-Content $AusgabeDatei "Keine gestoppten automatischen Dienste gefunden."
+            $prDc['DiensteGestartet'] = $true
         }
     } catch {
         Add-Content $AusgabeDatei "Fehler bei der Dienstprüfung: $($_.Exception.Message)"
@@ -531,6 +566,11 @@ foreach ($TargetDC in $AllDCs) {
 
             $compare | Sort-Object NameServer | Format-Table -AutoSize | Out-String | Add-Content $AusgabeDatei
 
+            if ($OnlineRootServers.Count -gt 0) {
+                $prDc['RootHintsOk'] = (@($missingLocal).Count -eq 0 -and @($compare | Where-Object { $_.IPsMatch -eq $false }).Count -eq 0)
+                if (-not $prDc['RootHintsOk']) { $notizDc += 'Root-Hints weichen von der offiziellen Liste ab' }
+            }
+
             if (($compare | Where-Object { $_.NameInLocalHints -eq $false }).Count -gt 0) {
                 Add-Content $AusgabeDatei ""
                 Add-Content $AusgabeDatei "WARNUNG: Mindestens ein Root-Nameserver fehlt lokal."
@@ -557,6 +597,8 @@ foreach ($TargetDC in $AllDCs) {
         Add-Content $AusgabeDatei "Fehler bei Root-Hints-Prüfung: $($_.Exception.Message)"
         Add-Content $AusgabeDatei "Korrektur der Root-Hints siehe https://github.com/frankenfrank/microsoft/blob/main/server/root-hints_update.ps1"
     }
+
+    $dcErgebnisse.Add([pscustomobject]@{ Ziel = $TargetDC; Erreicht = $dcErreicht; Pruefungen = [pscustomobject]$prDc; Werte = [pscustomobject]$werteDc; Notiz = $(if ($dcErreicht) { $notizDc -join '; ' } else { 'Domaincontroller nicht erreichbar oder DCDIAG fehlgeschlagen' }) })
 }
 
 Write-Host "Verwaiste Benutzer- und Computerkonten sind im Auswertungslog $AusgabeDatei aufgelistet" -ForeGroundColor Yellow
@@ -565,4 +607,12 @@ Add-Content $AusgabeDatei "=== ENDE DER ACTIVE DIRECTORY-WARTUNGSDATEN ==="
 Add-Content $AusgabeDatei "#WARTUNG_EVENTLOG_ENDE"
 Write-Host ""
 Write-Host "Resultate wurden gespeichert in $AusgabeDatei" -ForegroundColor Cyan
+
+if ($Automatik) {
+    Get-Content -LiteralPath $AusgabeDatei | Write-Host
+    Write-WtErgebnis -Skript '05.3-ActiveDirectory' -Ordner $Ausgabepfad -Ergebnisse $dcErgebnisse.ToArray()
+    if (@($dcErgebnisse | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Start-Process notepad.exe $AusgabeDatei

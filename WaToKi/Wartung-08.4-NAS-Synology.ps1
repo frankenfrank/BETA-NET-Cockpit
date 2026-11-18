@@ -5,10 +5,19 @@ param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
     [System.Management.Automation.PSCredential]$Anmeldedaten,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-08.4-NAS-Synology ===" -ForegroundColor Cyan
 Write-Host ""
@@ -31,8 +40,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - PARAMETER
 $Port = 5001
@@ -43,6 +54,11 @@ if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -
 
 # - SERVERLISTE
 $NASListe = @($Ziel | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne "" })
+if ($Automatik -and $NASListe.Count -eq 0) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (NAS) nötig." -ForegroundColor Red
+    exit 1
+}
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 if ($NASListe.Count -gt 0) {
     Write-Host "`nZu prüfende NAS (aus dem NET-COCKPIT):"
     $NASListe | ForEach-Object { Write-Host " - $_" }
@@ -87,6 +103,7 @@ $gemeinsamesKonto = $Anmeldedaten
 function Get-NasKonto {
     param([string]$NAS)
     if ($AnmeldedatenJeZiel -and $AnmeldedatenJeZiel.ContainsKey($NAS)) { return $AnmeldedatenJeZiel[$NAS] }
+    if (-not $script:gemeinsamesKonto -and $Automatik) { return $null }
     if (-not $script:gemeinsamesKonto) { $script:gemeinsamesKonto = Get-Credential -Message "DSM-Zugangsdaten (für $NAS)" }
     return $script:gemeinsamesKonto
 }
@@ -109,7 +126,7 @@ function Invoke-DsmLogin {
     $resp = Invoke-RestMethod -Uri $BaseUrl -Method Get -Body $params -SkipCertificateCheck -ErrorAction Stop
 
     # -- 2FA erforderlich -> OTP-Code abfragen
-    if (-not $resp.success -and $resp.error.code -eq 403) {
+    if (-not $resp.success -and $resp.error.code -eq 403 -and -not $Automatik) {
         $params["otp_code"] = Read-Host "OTP-Code für $NAS (2-Faktor)"
         $resp = Invoke-RestMethod -Uri $BaseUrl -Method Get -Body $params -SkipCertificateCheck -ErrorAction Stop
     }
@@ -127,11 +144,16 @@ foreach ($NAS in $NASListe) {
     try {
         # -- ANMELDUNG
         $cred = Get-NasKonto -NAS $NAS
-        if (-not $cred) { Write-Log "STATUS          : Keine Zugangsdaten - übersprungen"; continue }
+        if (-not $cred) {
+            Write-Log "STATUS          : Keine Zugangsdaten - übersprungen"
+            $ergebnisListe.Add([pscustomobject]@{ Ziel = $NAS; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Keine Zugangsdaten' })
+            continue
+        }
         $login = Invoke-DsmLogin -BaseUrl $baseUrl -Cred $cred -DeviceName $DeviceName -NAS $NAS
 
         if (-not $login.success) {
             Write-Log "STATUS          : Anmeldung fehlgeschlagen (Fehlercode $($login.error.code))"
+            $ergebnisListe.Add([pscustomobject]@{ Ziel = $NAS; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = "Anmeldung fehlgeschlagen (Fehlercode $($login.error.code))" })
             continue
         }
 
@@ -199,14 +221,54 @@ foreach ($NAS in $NASListe) {
         $swapTotalMB = [math]::Round($util.memory.total_swap / 1024, 0)
         Write-Log ("Swap genutzt            : {0}% (gesamt: {1} MB)" -f $util.memory.swap_usage, $swapTotalMB)
 
+        # -- ERGEBNIS FÜR DIE CHECKLISTE (Haken nur bei belegter Aussage: RAID/HDD = alle Pools, RAIDs und Datenträger "normal"; Firmware-Aktualität ist über die API nicht belegbar)
+        $pr = [ordered]@{}
+        $probleme = @()
+        $pools = @($storage.storagePools)
+        $disks = @($storage.disks)
+        if ($pools.Count -gt 0 -and $disks.Count -gt 0) {
+            $poolBad = @($pools | Where-Object { "$($_.status)" -ne 'normal' })
+            $raidBad = @($pools | ForEach-Object { $_.raids } | Where-Object { $_ -and ([int]$_.normalDevCount -ne [int]$_.designedDiskCount) })
+            $diskBad = @($disks | Where-Object { "$($_.status)" -ne 'normal' -or "$($_.smart_status)" -ne 'normal' })
+            $pr['RaidHdd'] = ($poolBad.Count -eq 0 -and $raidBad.Count -eq 0 -and $diskBad.Count -eq 0)
+            if ($poolBad.Count -gt 0) { $probleme += "Storage-Pool auffällig: $(@($poolBad | ForEach-Object { "$($_.desc) $($_.status)" }) -join ', ')" }
+            if ($raidBad.Count -gt 0) { $probleme += 'RAID nicht vollständig' }
+            if ($diskBad.Count -gt 0) { $probleme += "Datenträger auffällig: $(@($diskBad | ForEach-Object { "$($_.longName) $($_.status)/$($_.smart_status)" }) -join ', ')" }
+        }
+        $volWerte = @($storage.volumes | Where-Object { $_ -and [int64]$_.size.total -gt 0 } | ForEach-Object {
+            $tot = [int64]$_.size.total; $usd = [int64]$_.size.used
+            [pscustomobject]@{ Laufwerk = [string]$_.vol_desc; FreiGB = [math]::Round(($tot - $usd) / 1GB, 1); GroesseGB = [math]::Round($tot / 1GB, 1); FreiProzent = [math]::Round(($tot - $usd) / $tot * 100, 1) }
+        })
+        if ($volWerte.Count -gt 0) {
+            $pr['SpeicherplatzOk'] = (@($volWerte | Where-Object { $_.FreiProzent -lt 10 }).Count -eq 0)
+            if (-not $pr['SpeicherplatzOk']) { $probleme += 'Volume unter 10 % frei' }
+        }
+        $temps = @()
+        if ($null -ne $sys.sys_temp) { $temps += [pscustomobject]@{ Sensor = 'System'; Celsius = [double]$sys.sys_temp } }
+        foreach ($d in $disks) { if ($null -ne $d.temp) { $temps += [pscustomobject]@{ Sensor = [string]$d.longName; Celsius = [double]$d.temp } } }
+        $werte = [ordered]@{ Modell = [string]$sys.model; Firmware = [string]$sys.firmware_ver; Speicherplatz = $volWerte; Temperaturen = $temps }
+        $notiz = "$($sys.model), $($sys.firmware_ver)"
+        if ($probleme.Count -gt 0) { $notiz += '; ' + ($probleme -join '; ') }
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $NAS; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notiz })
+
         # -- ABMELDUNG
         $logoutParams = @{ api = "SYNO.API.Auth"; version = 6; method = "logout"; session = "SystemStatus" }
         Invoke-RestMethod -Uri $baseUrl -Method Get -Body $logoutParams -SkipCertificateCheck -ErrorAction SilentlyContinue | Out-Null
     }
     catch {
         Write-Log "STATUS          : Verbindung fehlgeschlagen - $($_.Exception.Message)"
+        if (-not ($ergebnisListe | Where-Object { $_.Ziel -eq $NAS })) {
+            $ergebnisListe.Add([pscustomobject]@{ Ziel = $NAS; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Verbindung fehlgeschlagen' })
+        }
     }
 }
 
 Write-Log "`n`nErgebnisdatei: $AusgabeDatei"
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '08.4-NAS-Synology' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Invoke-Item -LiteralPath $AusgabeDatei

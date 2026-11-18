@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [System.Management.Automation.PSCredential]$Anmeldedaten
+    [System.Management.Automation.PSCredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-09.4-Starface-Cloud ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,17 +38,38 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - EINGABEN
+if ($Automatik -and ([string]::IsNullOrWhiteSpace($Ziel) -or -not $Anmeldedaten)) {
+    Write-Host "Abbruch: Im Automatikmodus sind -Ziel (Anlage) und -Anmeldedaten (Konto) nötig." -ForegroundColor Red
+    exit 1
+}
 $anlagenEingabe = if ([string]::IsNullOrWhiteSpace($Ziel)) { Read-Host "Anlagen-URL" } else { $Ziel.Trim() }
 $hostname     = $anlagenEingabe -replace '^https?://', '' -replace '/.*$', ''
 $cred         = $Anmeldedaten
 if (-not $cred) { $cred = Get-Credential -Message "STARFACE Benutzer" }
 if (-not $cred) { Write-Host "Keine Zugangsdaten - Skript wird beendet." -ForegroundColor Red; return }
-$clientSecret = Read-Host "Client-Secret (rest-client-headless) für $hostname" -AsSecureString
-$clientSecret = [System.Net.NetworkCredential]::new("", $clientSecret).Password
+$userPasswort = $cred.GetNetworkCredential().Password
+if ($Automatik) {
+    # Konto-Passwort im Format "<Benutzerpasswort>|<Client-Secret>" (Trennung am letzten "|")
+    $trenner = $userPasswort.LastIndexOf('|')
+    if ($trenner -lt 1 -or $trenner -ge ($userPasswort.Length - 1)) {
+        Write-Host "Abbruch: Das Passwort im Konto muss im Format <Benutzerpasswort>|<Client-Secret> hinterlegt sein." -ForegroundColor Red
+        $ordnerFehler = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
+        Write-WtErgebnis -Skript '09.4-Starface-Cloud' -Ordner $ordnerFehler -Ergebnisse @([pscustomobject]@{ Ziel = $hostname; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Client-Secret im Konto fehlt' })
+        exit 1
+    }
+    $clientSecret = $userPasswort.Substring($trenner + 1)
+    $userPasswort = $userPasswort.Substring(0, $trenner)
+}
+else {
+    $clientSecret = Read-Host "Client-Secret (rest-client-headless) für $hostname" -AsSecureString
+    $clientSecret = [System.Net.NetworkCredential]::new("", $clientSecret).Password
+}
 
 # - ANLAGENNAME
 $AnlageClean = $hostname -replace '[\\\/:\*\?"<>\|]', '' -replace '\s+', '_'
@@ -71,7 +101,7 @@ $body = @{
     client_id     = 'rest-client-headless'
     client_secret = $clientSecret
     username      = $cred.UserName
-    password      = $cred.GetNetworkCredential().Password
+    password      = $userPasswort
     scope         = 'pbx-admin'
 }
 try {
@@ -80,6 +110,10 @@ try {
 catch {
     Write-Host "Anmeldung an $hostname fehlgeschlagen: $($_.Exception.Message) $($_.ErrorDetails.Message)" -ForegroundColor Red
     Write-Host "Bitte Benutzer (Spalte Konto), Berechtigung 'API Zugriff mit OAuth Password Grant' und Client-Secret prüfen." -ForegroundColor Yellow
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '09.4-Starface-Cloud' -Ordner $Ordner -Ergebnisse @([pscustomobject]@{ Ziel = $hostname; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Anmeldung fehlgeschlagen' })
+        exit 1
+    }
     return
 }
 $headers = @{ Authorization = "Bearer $($tokenResponse.access_token)" }
@@ -259,3 +293,16 @@ Write-Log "Konfiguration gesichert: Backup in der Oberflaeche unter Server -> Ba
 
 Write-Host ""
 Write-Host "Bericht gespeichert: $filepath" -ForegroundColor Green
+
+if ($Automatik) {
+    # - ERGEBNIS FÜR DIE CHECKLISTE (keine Haken: Version steht in der Notiz, alles Weitere in der Detaildatei)
+    $notiz = if ($version) { "STARFACE $($version.version) (Release $($version.release))" } else { 'Version nicht abfragbar' }
+    Write-WtErgebnis -Skript '09.4-Starface-Cloud' -Ordner $Ordner -Ergebnisse @([pscustomobject]@{
+        Ziel       = $hostname
+        Erreicht   = $true
+        Pruefungen = [pscustomobject]@{}
+        Werte      = [pscustomobject]@{ Version = [string]$version.version; Release = [string]$version.release; ReleaseDatum = [string]$version.releaseDate; LetzteAktualisierung = [string]$version.lastUpdate; Benutzer = @($users).Count }
+        Notiz      = $notiz
+    })
+    exit 0
+}

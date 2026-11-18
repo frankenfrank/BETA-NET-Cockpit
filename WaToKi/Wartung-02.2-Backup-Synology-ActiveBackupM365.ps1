@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-02.2-Backup-Synology-ActiveBackupM365 ===" -ForegroundColor Cyan
 Write-Host ""
@@ -30,8 +39,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - PARAMETER
 $Port            = 5001
@@ -45,6 +56,11 @@ if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -
 
 # - ZIELE BESTIMMEN
 $NASListe = @($Ziel | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne "" })
+
+if ($Automatik -and $NASListe.Count -eq 0) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (NAS) nötig." -ForegroundColor Red
+    exit 1
+}
 
 if ($NASListe.Count -gt 0) {
     Write-Host "`nZu prüfende NAS (aus dem NET-COCKPIT):"
@@ -129,6 +145,7 @@ function Invoke-DsmLogin {
 
     # -- 2FA erforderlich -> OTP-Code abfragen
     if (-not $resp.success -and $resp.error.code -eq 403) {
+        if ($Automatik) { Write-Host "2-Faktor-Authentifizierung auf $NAS aktiv, im Automatikmodus ist keine OTP-Eingabe möglich." -ForegroundColor Yellow; return $resp }
         $params["otp_code"] = Read-Host "OTP-Code für $NAS (2-Faktor)"
         $resp = Invoke-RestMethod -Uri $BaseUrl -Method Get -Body $params -SkipCertificateCheck -ErrorAction Stop
     }
@@ -150,7 +167,9 @@ $dienste = [ordered]@{
 $bekannteInfoCodes = @(0, -84, -85, -86, -87)
 
 # - API-ABFRAGE JE NAS
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 foreach ($NAS in $NASListe) {
+    $erg = @{ Erreicht = $false; Tasks = 0; AlleOk = $true; Pruefbar = $true; Notizen = [System.Collections.Generic.List[string]]::new() }
     Write-Log "`n===== Backuplogs: Synology Active Backup for M365 ====="
     Write-Log "===== NAS: $NAS ====="
 
@@ -165,6 +184,7 @@ foreach ($NAS in $NASListe) {
             Write-Host "→ Anmeldung mit Konto $($nasCred.UserName)..."
         }
         elseif ($cred) { $nasCred = $cred }
+        elseif ($Automatik) { $nasCred = $null }
         else {
             $cred    = Get-Credential -Message "DSM-Zugangsdaten für $NAS (Active Backup for Microsoft 365)"
             $nasCred = $cred
@@ -182,6 +202,7 @@ foreach ($NAS in $NASListe) {
             if ($login.success) { break }
 
             Write-Log "STATUS          : Anmeldung fehlgeschlagen (Fehlercode $($login.error.code), Versuch $versuch von $maxVersuche)"
+            if ($Automatik) { break }
             if ($versuch -lt $maxVersuche) {
                 $nasCred = Get-Credential -Message "DSM-Zugangsdaten für $NAS erneut eingeben"
                 if (-not $nasCred) { break }
@@ -194,6 +215,7 @@ foreach ($NAS in $NASListe) {
         }
 
         $sid = $login.data.sid
+        $erg.Erreicht = $true
 
         # -- AUFGABEN ABRUFEN
         $tasksParams = @{ api = "SYNO.ActiveBackupOffice365"; version = 1; method = "list_tasks"; _sid = $sid }
@@ -295,6 +317,13 @@ foreach ($NAS in $NASListe) {
             elseif ($warnungBefunde.Count -gt 0) { $bewertung = "WARNUNG"; $farbe = "Yellow" }
             else                                 { $bewertung = "OK";      $farbe = "Green" }
 
+            # --- KENNZAHLEN FÜR DIE CHECKLISTE (strikt: Haken nur, wenn die Bewertung OK ist und das Protokoll der letzten $TageZurueck Tage keine Auffälligkeit enthält)
+            $erg.Tasks++
+            if ($logFehler) { $erg.Pruefbar = $false; $erg.Notizen.Add("$($task.task_name): Protokoll nicht abrufbar") }
+            if ($bewertung -ne 'OK') { $erg.AlleOk = $false; $erg.Notizen.Add("$($task.task_name): $bewertung") }
+            $auff30 = @($geparst | Where-Object { $_.Auffaellig })
+            if ($auff30.Count -gt 0) { $erg.AlleOk = $false; $erg.Notizen.Add("$($task.task_name): $($auff30.Count) Auffälligkeiten in $TageZurueck Tagen") }
+
             $bewertungText = "BACKUP-BEWERTUNG : $bewertung (letzte Ausführung vor $alterStunden h)"
             Write-Host "`n$bewertungText" -ForegroundColor $farbe
             Add-Content -Path $AusgabeDatei -Value "`n$bewertungText"
@@ -377,8 +406,27 @@ foreach ($NAS in $NASListe) {
     }
     catch {
         Write-Log "STATUS          : Verbindung fehlgeschlagen - $($_.Exception.Message)"
+        $erg.Notizen.Add('Verbindung fehlgeschlagen')
+    }
+    finally {
+        $backupOk = $null
+        if ($erg.Erreicht -and $erg.Pruefbar -and $erg.Tasks -gt 0) { $backupOk = [bool]$erg.AlleOk }
+        if ($erg.Erreicht -and $erg.Tasks -eq 0) { $erg.Notizen.Add('keine Backup-Tasks gefunden') }
+        if (-not $erg.Erreicht -and $erg.Notizen.Count -eq 0) { $erg.Notizen.Add('nicht erreicht oder Anmeldung fehlgeschlagen') }
+        $ergebnisListe.Add([pscustomobject]@{
+            Ziel = $NAS; Erreicht = [bool]$erg.Erreicht
+            Pruefungen = $(if ($erg.Erreicht) { [pscustomobject]@{ BackupErfolgreich = $backupOk } } else { [pscustomobject]@{} })
+            Werte = [pscustomobject]@{ Tasks = $erg.Tasks }
+            Notiz = ($erg.Notizen -join '; ')
+        })
     }
 }
 
 Write-Log "`n`nErgebnisdatei: $AusgabeDatei"
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '02.2-Backup-Synology-ActiveBackupM365' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    exit $(if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -gt 0) { 0 } else { 1 })
+}
+
 Invoke-Item -LiteralPath $AusgabeDatei

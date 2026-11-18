@@ -5,10 +5,19 @@ param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
     [System.Management.Automation.PSCredential]$Anmeldedaten,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-09.4-3CX-onPrem ===" -ForegroundColor Cyan
 Write-Host ""
@@ -31,12 +40,14 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - VORAUSSETZUNG: MODUL POSH-SSH ---
 if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
-    $antwort = Read-Host "Modul 'Posh-SSH' ist nicht installiert. Jetzt installieren? (j/n)"
+    $antwort = if ($Automatik) { "j" } else { Read-Host "Modul 'Posh-SSH' ist nicht installiert. Jetzt installieren? (j/n)" }
     if ($antwort -eq "j") {
         try {
             Install-Module -Name Posh-SSH -Scope CurrentUser -Force -ErrorAction Stop
@@ -65,6 +76,10 @@ if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -
 
 # - SERVERLISTE
 $ServerListe = @($Ziel | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne "" })
+if ($Automatik -and $ServerListe.Count -eq 0) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (3CX-Server) nötig." -ForegroundColor Red
+    exit 1
+}
 if ($ServerListe.Count -gt 0) {
     Write-Host "`nZu pruefende 3CX-Server (aus dem NET-COCKPIT):"
     $ServerListe | ForEach-Object { Write-Host " - $_" }
@@ -167,6 +182,10 @@ function Test-Or-Repair-WindowsOpenSSH {
         return $false
     }
 
+    if ($Automatik) {
+        Write-Host "Automatikmodus: kein automatischer Fix (OpenSSH-Installation) auf $ComputerName."
+        return $false
+    }
     $antwort = Read-Host "SSH-Port auf $ComputerName nicht erreichbar. Per WinRM pruefen und OpenSSH ggf. installieren/Firewall setzen? (j/n)"
     if ($antwort -ne "j") { return $false }
 
@@ -261,7 +280,7 @@ foreach ($Server in $ServerListe) {
 
         $fixCred = $Anmeldedaten
         if ($AnmeldedatenJeZiel -and $AnmeldedatenJeZiel.ContainsKey($Server)) { $fixCred = $AnmeldedatenJeZiel[$Server] }
-        if (-not $fixCred) { $fixCred = Read-CredentialConsole -Message "Admin-Zugangsdaten fuer den $Server (nicht 3CX-Zugangsdaten)" -AllowSkip }
+        if (-not $fixCred -and -not $Automatik) { $fixCred = Read-CredentialConsole -Message "Admin-Zugangsdaten fuer den $Server (nicht 3CX-Zugangsdaten)" -AllowSkip }
         if ($fixCred -and (Test-Or-Repair-WindowsOpenSSH -ComputerName $Server -Credential $fixCred)) {
             Start-Sleep -Seconds 3
             $portCheck = Test-NetConnection -ComputerName $Server -Port $SSHPort -InformationLevel Quiet -WarningAction SilentlyContinue
@@ -277,12 +296,19 @@ foreach ($Server in $ServerListe) {
     # --- Zugangsdaten (pro Server): zuerst das Konto dieses Geräts aus dem NET-COCKPIT, sonst Abfrage ---
     $cred = $Anmeldedaten
     if ($AnmeldedatenJeZiel -and $AnmeldedatenJeZiel.ContainsKey($Server)) { $cred = $AnmeldedatenJeZiel[$Server] }
+    if (-not $cred -and $Automatik) {
+        Write-Log "STATUS          : Keine Zugangsdaten"
+        $summary.Status = "Keine Zugangsdaten"
+        $Zusammenfassung += [PSCustomObject]$summary
+        continue
+    }
     if (-not $cred) { $cred = Read-CredentialConsole -Message "Zugangsdaten fuer 3CX-Server: $Server" }
 
     # --- SSH-Session (mit Login-Retry, max. 3 Versuche) ---
     $MaxLoginVersuche = 3
     $session = $null
     for ($LoginVersuch = 1; $LoginVersuch -le $MaxLoginVersuche; $LoginVersuch++) {
+        if ($LoginVersuch -gt 1 -and $Automatik) { break }
         if ($LoginVersuch -gt 1) {
             Write-Log "STATUS          : SSH-Login fehlgeschlagen (Versuch $($LoginVersuch - 1)/$MaxLoginVersuche) - erneuter Versuch..." -ForegroundColor Yellow
             $cred = Read-CredentialConsole -Message "Zugangsdaten fuer 3CX-Server: $Server (Versuch $LoginVersuch/$MaxLoginVersuche)"
@@ -387,6 +413,31 @@ foreach ($s in $Zusammenfassung) {
         $s.Services | ForEach-Object { Write-Log "   - $_" }
         Write-Log "Letztes Backup   : $($s.LetztesBackup)"
     }
+}
+
+if ($Automatik) {
+    # - ERGEBNIS FÜR DIE CHECKLISTE (keine Haken: Dienststatus und Backup-Alter stehen in der Notiz)
+    $ergebnisListe = foreach ($s in $Zusammenfassung) {
+        if ($s.Status -ne 'OK') {
+            [pscustomobject]@{ Ziel = [string]$s.Server; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = [string]$s.Status }
+            continue
+        }
+        $dienste = @($s.Services | Where-Object { $_ -and $_ -notmatch '^keine ' })
+        $laufen = @($dienste | Where-Object { $_ -match '(?i)running' }).Count
+        $notizTeile = @()
+        $notizTeile += $(if ($dienste.Count -gt 0) { "3CX-Dienste: $laufen von $($dienste.Count) laufen" } else { '3CX-Dienste: keine gefunden' })
+        $notizTeile += "Letztes Backup: $($s.LetztesBackup)"
+        [pscustomobject]@{
+            Ziel       = [string]$s.Server
+            Erreicht   = $true
+            Pruefungen = [pscustomobject]@{}
+            Werte      = [pscustomobject]@{ System = [string]$s.System; Betriebssystem = [string]$s.Betriebssystem; Pakete = @($s.Paket3CX); Dienste = $dienste; LetztesBackup = [string]$s.LetztesBackup }
+            Notiz      = ($notizTeile -join '; ')
+        }
+    }
+    Write-WtErgebnis -Skript '09.4-3CX-onPrem' -Ordner $Ausgabepfad -Ergebnisse @($ergebnisListe)
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
 }
 
 # --- Kein Log behalten, wenn kein Server erfolgreich abgefragt wurde ---

@@ -5,10 +5,19 @@ param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
     [System.Management.Automation.PSCredential]$Anmeldedaten,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-03.1-physServeriDRAC ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,8 +38,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - VERZEICHNIS UND DATEINAME
 $LogPath = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
@@ -43,6 +54,11 @@ $LogFile = Join-Path $LogPath "Wartung_$Timestamp`_physServer.txt"
 
 # - ZIELE BESTIMMEN
 $ips = @($Ziel | ForEach-Object { "$_".Trim() } | Where-Object { $_ -ne "" })
+
+if ($Automatik -and $ips.Count -eq 0) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (iDRAC-Adressen) nötig." -ForegroundColor Red
+    exit 1
+}
 
 if ($ips.Count -gt 0) {
     Write-Host "`nZu prüfende iDRAC Hosts (aus dem NET-COCKPIT):"
@@ -139,6 +155,7 @@ function Test-IdracReachable($ip, $port = 443, $timeoutMs = 2000) {
 # - HAUPTAUSFÜHRUNG
 $summary = @()
 $details = @()
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 
 foreach ($ip in $ips) {
     Write-Host "`n→ Prüfe Erreichbarkeit von $ip..."
@@ -146,6 +163,7 @@ foreach ($ip in $ips) {
     if (-not (Test-IdracReachable $ip)) {
         Write-Host "$ip"
         Write-Host "Verbindung fehlgeschlagen"
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $ip; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'iDRAC nicht erreichbar (Port 443)' })
         continue
     }
 
@@ -173,7 +191,7 @@ foreach ($ip in $ips) {
     }
 
     # Sonst Abfrage per Anmeldefenster (3 Versuche)
-    if (-not $loginOk) {
+    if (-not $loginOk -and -not $Automatik) {
         for ($loginVersuch = 1; $loginVersuch -le 3; $loginVersuch++) {
             $cred = Get-Credential -Message "Zugangsdaten für iDRAC $ip (Versuch $loginVersuch von 3)"
             if (-not $cred) { break }
@@ -192,6 +210,7 @@ foreach ($ip in $ips) {
     if (-not $loginOk) {
         Write-Host "$ip"
         Write-Host "Anmeldung fehlgeschlagen"
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $ip; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'iDRAC-Anmeldung fehlgeschlagen' })
         continue
     }
 
@@ -248,6 +267,23 @@ foreach ($ip in $ips) {
     $summary += "Bios: $biosHealth $biosv"
     $summary += "Netzteile: $psuStatus`r`n"
 
+    # Ergebnis für die Checkliste: Haken (geprüft) nur, wenn der Bereich fehlerfrei ist; Temperaturen alle ungefiltert
+    $temperaturen = @()
+    if ($thermal -and $thermal.Temperatures) {
+        $temperaturen = @($thermal.Temperatures | Where-Object { $null -ne $_.ReadingCelsius } | ForEach-Object { [pscustomobject]@{ Sensor = [string]$_.Name; Celsius = $_.ReadingCelsius } })
+    }
+    $nichtOk = @()
+    if ($raidStatus -ne 'OK') { $nichtOk += 'RAID/HDD' }
+    if ($firmHealth -ne 'OK') { $nichtOk += 'Firmware' }
+    if ($biosHealth -ne 'OK') { $nichtOk += 'BIOS' }
+    if ($psuStatus -ne 'OK') { $nichtOk += 'Netzteile' }
+    $ergebnisListe.Add([pscustomobject]@{
+        Ziel = $ip; Erreicht = $true
+        Pruefungen = [pscustomobject]@{ RaidHdd = ($raidStatus -eq 'OK'); Firmware = ($firmHealth -eq 'OK'); Bios = ($biosHealth -eq 'OK'); Netzteile = ($psuStatus -eq 'OK') }
+        Werte = [pscustomobject]@{ BiosVersion = [string]$biosv; FirmwareVersion = [string]$firmv; Temperaturen = $temperaturen }
+        Notiz = $(if ($nichtOk.Count -gt 0) { 'Bitte manuell nachkontrollieren: ' + ($nichtOk -join ', ') } else { '' })
+    })
+
     # Detaildaten
     $details += "============================================================="
     $details += "HOST: $ip"
@@ -301,8 +337,13 @@ if ($summary.Count -gt 0) {
     @($summary; "============================================================="; $details) | Out-File -LiteralPath $LogFile -Encoding utf8
 
     # - DATEI ÖFFNEN
-    Start-Process notepad.exe $LogFile
+    if (-not $Automatik) { Start-Process notepad.exe $LogFile }
 } else {
     Write-Host "`nKeine erfolgreiche Abfrage – keine Logdatei erstellt." -ForegroundColor Yellow
 }
 Write-Host "`nFertig."
+
+if ($Automatik) {
+    Write-WtErgebnis -Skript '03.1-physServeriDRAC' -Ordner $LogPath -Ergebnisse $ergebnisListe.ToArray()
+    exit $(if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -gt 0) { 0 } else { 1 })
+}

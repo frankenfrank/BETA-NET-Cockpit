@@ -384,12 +384,12 @@ function Send-WolPaket {
 ### Anzeige von Fenstertitel und Listenpfad
 function Update-WolListeAnzeige {
     if ($script:ListenPfad) {
-        $script:Fenster.Title = "NET-COCKPIT - $($script:ListenPfad)"
+        $script:Fenster.Title = "BETA NET-COCKPIT - $($script:ListenPfad)"
         $script:C.TxtListe.Text = "Geräteliste: $($script:ListenPfad)"
         $script:AutoHinweisGezeigt = $false
     }
     else {
-        $script:Fenster.Title = 'NET-COCKPIT'
+        $script:Fenster.Title = 'BETA NET-COCKPIT'
         $script:C.TxtListe.Text = 'Geräteliste: noch keine Datei (Speichern fragt nach Name und Ort)'
     }
 }
@@ -2224,7 +2224,7 @@ function Show-WolInfo {
     $d = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT - Info / Voraussetzungen" Width="940" Height="720" WindowStartupLocation="CenterOwner">
+        Title="BETA NET-COCKPIT - Info / Voraussetzungen" Width="940" Height="720" WindowStartupLocation="CenterOwner">
   <Grid Margin="12">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -2553,7 +2553,7 @@ Add-WolStartMarke 'Funktionen und Dialoge definiert'
 $script:Fenster = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT" Width="1500" Height="760" WindowStartupLocation="CenterScreen">
+        Title="BETA NET-COCKPIT" Width="1500" Height="760" WindowStartupLocation="CenterScreen">
   <Grid Margin="8">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -3327,7 +3327,7 @@ function Show-WolBefehl {
         $script:BefehlFenster = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT - PowerShell-Befehl senden" Width="920" Height="740" WindowStartupLocation="CenterOwner">
+        Title="BETA NET-COCKPIT - PowerShell-Befehl senden" Width="920" Height="740" WindowStartupLocation="CenterOwner">
   <Grid Margin="10">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -3918,7 +3918,7 @@ function Show-WolExportDialog {
     $d = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT - Geräteliste exportieren" Width="520" Height="640" WindowStartupLocation="CenterOwner">
+        Title="BETA NET-COCKPIT - Geräteliste exportieren" Width="520" Height="640" WindowStartupLocation="CenterOwner">
   <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -4300,7 +4300,7 @@ function Show-WolPing {
         $script:PingFenster = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT - Dauerping" Width="720" Height="480" WindowStartupLocation="CenterOwner">
+        Title="BETA NET-COCKPIT - Dauerping" Width="720" Height="480" WindowStartupLocation="CenterOwner">
   <TabControl x:Name="Tabs" Margin="6"/>
 </Window>
 '@
@@ -4987,7 +4987,7 @@ function Install-WolNachladen {
     $f = New-WolFenster @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="NET-COCKPIT" Width="440" SizeToContent="Height"
+        Title="BETA NET-COCKPIT" Width="440" SizeToContent="Height"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Topmost="True"
         Background="White" FontFamily="Segoe UI">
   <StackPanel Margin="24">

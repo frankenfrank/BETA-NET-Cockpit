@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-08.2-Switche-Netgear ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,13 +38,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Switche) nötig." -ForegroundColor Red
+    exit 1
+}
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -56,6 +71,7 @@ function Get-ZielAnmeldung {
         $c = Get-ZielKonto -Name $Name
         if ($c) { return $c }
     }
+    if ($Automatik) { return $null }
     return (Get-Credential -Message $Meldung)
 }
 
@@ -95,6 +111,7 @@ else {
 }
 if ($ips.Count -eq 0) {
     Write-Host "→ Keine Switch-IP-Adressen hinterlegt – Abschnitt wird übersprungen."
+    if ($Automatik) { exit 1 }
     return
 }
 
@@ -171,6 +188,13 @@ function Invoke-SwitchCommand {
 # - HAUPTAUSFÜHRUNG
 $summary = @()
 $details = @()
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
+
+## Gerät nicht erreichbar bzw. Abfrage fehlgeschlagen: Ergebnis ohne Haken
+function Add-SwFehler {
+    param([string]$Ziel, [string]$Notiz)
+    $ergebnisListe.Add([pscustomobject]@{ Ziel = $Ziel; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = $Notiz })
+}
 
 $SSHPort = 22
 
@@ -181,6 +205,7 @@ foreach ($ip in $ips) {
     if (-not (Test-Connection -ComputerName $ip -Count 1 -Quiet)) {
         Write-Host "STATUS          : Nicht erreichbar (Ping fehlgeschlagen)" -ForegroundColor Red
         $summary += "$ip`r`nNicht erreichbar (Ping fehlgeschlagen)`r`n"
+        Add-SwFehler -Ziel $ip -Notiz 'Nicht erreichbar (Ping fehlgeschlagen)'
         continue
     }
 
@@ -189,6 +214,7 @@ foreach ($ip in $ips) {
     if (-not $portCheck) {
         Write-Host "STATUS          : Ping OK, SSH-Port $SSHPort nicht erreichbar" -ForegroundColor Red
         $summary += "$ip`r`nPing OK, SSH-Port $SSHPort nicht erreichbar`r`n"
+        Add-SwFehler -Ziel $ip -Notiz "SSH-Port $SSHPort nicht erreichbar"
         continue
     }
 
@@ -208,6 +234,7 @@ foreach ($ip in $ips) {
     if (-not $session) {
         Write-Host "STATUS          : SSH-Verbindung fehlgeschlagen (Login/Auth)" -ForegroundColor Red
         $summary += "$ip`r`nSSH-Login fehlgeschlagen: $loginFehler`r`n"
+        Add-SwFehler -Ziel $ip -Notiz 'SSH-Anmeldung fehlgeschlagen'
         continue
     }
 
@@ -216,6 +243,7 @@ foreach ($ip in $ips) {
     } catch {
         Write-Host "STATUS          : Shell-Stream konnte nicht geoeffnet werden" -ForegroundColor Red
         $summary += "$ip`r`nShell-Stream fehlgeschlagen: $($_.Exception.Message)`r`n"
+        Add-SwFehler -Ziel $ip -Notiz 'Shell-Stream konnte nicht geöffnet werden'
         Remove-SSHSession -SSHSession $session | Out-Null
         continue
     }
@@ -293,6 +321,23 @@ foreach ($ip in $ips) {
     $details += "RUNNING-CONFIG (Konfigurationssicherung):"
     $details += $runningConfig
     $details += "============================================================="
+
+    ## Ergebnis für die Checkliste: Haken nur für die Konfigurationssicherung (running-config vollständig und ohne Fehlermeldung des Switches); Firmware-Aktualität und VLAN sind per CLI nicht belegbar
+    if ($Automatik) {
+        $sicherOrdner = Join-Path $LogPath 'configbackups'
+        if (-not (Test-Path -LiteralPath $sicherOrdner)) { New-Item -ItemType Directory -Path $sicherOrdner -Force | Out-Null }
+        $sicherDatei = Join-Path $sicherOrdner ("{0}_{1}_Backup.txt" -f ($ip -replace '[\\/:*?"<>|]', '_'), (Get-Date).ToString('yyMMdd'))
+        $runningConfig | Out-File -FilePath $sicherDatei -Encoding utf8
+        $backupOk = ($runningConfig -match '(?m)^!Current Configuration') -and ($runningConfig -notmatch '(?i)Invalid input|Incomplete command|FEHLER beim Ausfuehren|Befehlsecho unvollstaendig')
+        $pr = [ordered]@{ KonfigSicherung = [bool]$backupOk }
+        $vers = if ($verText -match '(?mi)^\s*(Software|Firmware|Machine)\S*\s*(Version)?[ .]*\s*(?<v>[0-9][^\r\n]*)$') { $Matches['v'].Trim() } else { $null }
+        $werte = [ordered]@{
+            Version       = $vers
+            TemperaturRoh = @($envText -split '\r?\n' | Where-Object { $_ -match '(?i)temp' } | ForEach-Object { $_.Trim() })
+        }
+        $notizSw = $(if ($backupOk) { 'Konfigsicherung erstellt' } else { 'Konfigsicherung nicht eindeutig (Details prüfen)' })
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $ip; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notizSw })
+    }
 }
 
 # - LOGDATEI SCHREIBEN
@@ -301,5 +346,12 @@ Write-Host "`nLogdatei gespeichert unter: $LogFile" -ForegroundColor Cyan
 @($summary; "============================================================="; $details) | Out-File -FilePath $LogFile -Encoding utf8
 
 # - DATEI ÖFFNEN
+if ($Automatik) {
+    ## Konsole = Detail für den Techniker; die running-config liegt in configbackups\ und bleibt hier draußen
+    $details | ForEach-Object { $_ } | Where-Object { $_ -ne $null } | Write-Host
+    Write-WtErgebnis -Skript '08.2-Switche-Netgear' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
 Invoke-Item $LogFile
 Write-Host "`nFertig."

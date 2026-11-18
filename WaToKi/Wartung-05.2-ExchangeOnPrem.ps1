@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [pscredential]$Anmeldedaten
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-05.2-ExchangeOnPrem ===" -ForegroundColor Cyan
 Write-Host ""
@@ -28,8 +37,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
@@ -38,7 +49,7 @@ if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -
 # - EXCHANGE-SERVER
 $lokalerName = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
 $ExchangeServer = $Ziel
-if ([string]::IsNullOrWhiteSpace($ExchangeServer)) {
+if ([string]::IsNullOrWhiteSpace($ExchangeServer) -and -not $Automatik) {
     $ExchangeServer = Read-Host "Exchange-Server (FQDN, leer = $lokalerName)"
 }
 if ([string]::IsNullOrWhiteSpace($ExchangeServer)) { $ExchangeServer = $lokalerName }
@@ -54,6 +65,7 @@ $sitzungParam = @{
 $Cred = $Anmeldedaten
 $sitzung = $null
 for ($versuch = 1; $versuch -le 3 -and -not $sitzung; $versuch++) {
+    if ($versuch -gt 1 -and $Automatik) { break }
     if ($versuch -gt 1) {
         $Cred = Get-Credential -Message "Anmeldung an $ExchangeServer (Versuch $versuch von 3)"
         if (-not $Cred) { break }
@@ -68,6 +80,10 @@ for ($versuch = 1; $versuch -le 3 -and -not $sitzung; $versuch++) {
 }
 if (-not $sitzung) {
     Write-Host "Keine Verbindung zur Exchange Management Shell auf $ExchangeServer möglich. Skript wird beendet." -ForegroundColor Red
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '05.2-ExchangeOnPrem' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $ExchangeServer; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Verbindung zur Exchange Management Shell fehlgeschlagen' })
+        exit 1
+    }
     return
 }
 
@@ -130,6 +146,42 @@ Add-Content $Datei "Link zu aktuellen CU-Updates: https://learn.microsoft.com/en
 
 Add-Content $Datei "`n===== Ende Exchange-Kurzcheck ====="
 
+# - ERGEBNIS FÜR DIE CHECKLISTE (Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+$pr = [ordered]@{}
+$probleme = @()
+$werte = [ordered]@{ Version = [string]$Version }
+try {
+    $kopien = @(Invoke-Command -Session $sitzung -ErrorAction Stop -ScriptBlock {
+        $null = Get-DatabaseAvailabilityGroup -ErrorAction Stop
+        Get-MailboxDatabaseCopyStatus * | ForEach-Object { [pscustomobject]@{ Name = [string]$_.Name; Status = [string]$_.Status } }
+    })
+    if ($kopien.Count -gt 0) {
+        $schlecht = @($kopien | Where-Object { $_.Status -notin @('Mounted', 'Healthy') })
+        $pr['DagOk'] = ($schlecht.Count -eq 0)
+        if ($schlecht.Count -gt 0) { $probleme += "DAG-Kopien auffällig: $(@($schlecht | ForEach-Object { "$($_.Name) $($_.Status)" }) -join ', ')" }
+    }
+} catch { }
+try {
+    $zert = @(Invoke-Command -Session $sitzung -ErrorAction Stop -ScriptBlock {
+        Get-ExchangeCertificate | ForEach-Object { [pscustomobject]@{ Name = [string]$_.FriendlyName; Dienste = [string]$_.Services; Ablauf = $_.NotAfter } }
+    })
+    if ($zert.Count -gt 0) {
+        $werte['Zertifikate'] = @($zert | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Dienste = $_.Dienste; Ablauf = ([datetime]$_.Ablauf).ToString('yyyy-MM-dd') } })
+        $abgelaufen = @($zert | Where-Object { $_.Dienste -ne 'None' -and [datetime]$_.Ablauf -lt (Get-Date) })
+        $pr['ZertifikateGueltig'] = ($abgelaufen.Count -eq 0)
+        if ($abgelaufen.Count -gt 0) { $probleme += "Zertifikat abgelaufen: $(@($abgelaufen | ForEach-Object { $_.Name }) -join ', ')" }
+    }
+} catch { }
+$werte['AltePostfaecher'] = $altePostfaecher.Count
+
 Remove-PSSession $sitzung -ErrorAction SilentlyContinue
 
 Write-Host "Kurzcheck abgeschlossen. Datei gespeichert unter: $Datei" -ForegroundColor Yellow
+
+if ($Automatik) {
+    Get-Content -LiteralPath $Datei | Write-Host
+    $notiz = "Version $Version"
+    if ($probleme.Count -gt 0) { $notiz += '; ' + ($probleme -join '; ') }
+    Write-WtErgebnis -Skript '05.2-ExchangeOnPrem' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $ExchangeServer; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notiz })
+    exit 0
+}

@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-07.1-Firewall-Sophos ===" -ForegroundColor Cyan
 Write-Host ""
@@ -27,13 +36,20 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (Firewalls) nötig." -ForegroundColor Red
+    exit 1
+}
+$ergebnisListe = [System.Collections.Generic.List[object]]::new()
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -108,14 +124,19 @@ foreach ($Firewall in $FirewallListe) {
     Write-Host "`n===== Sophos: $Firewall ====="
     Add-Content $Datei "`n===== Sophos: $Firewall ====="
 
+    $erreicht = $false
+    $notizFw = ''
+    $offenListe = @()
+
     # --- Zugangsdaten: Konto aus dem NET-COCKPIT, sonst einmalige Abfrage für alle Firewalls ---
     $cred = Get-ZielKonto -Name $Firewall
     if (-not $cred) {
-        if (-not $script:ManuellKonto) { $script:ManuellKonto = Get-Credential -Message "API-Zugangsdaten für Sophos Firewall (Benutzer mit API-Zugriff)" }
+        if (-not $script:ManuellKonto -and -not $Automatik) { $script:ManuellKonto = Get-Credential -Message "API-Zugangsdaten für Sophos Firewall (Benutzer mit API-Zugriff)" }
         $cred = $script:ManuellKonto
     }
     if (-not $cred) {
         Add-Content $Datei "Keine Zugangsdaten vorhanden, Firewall übersprungen."
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $Firewall; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Keine Zugangsdaten' })
         continue
     }
     $user = [System.Security.SecurityElement]::Escape($cred.UserName)
@@ -154,8 +175,10 @@ foreach ($Firewall in $FirewallListe) {
         if ($result.Response.Login.status -eq "Authentication Failure") {
             Add-Content $Datei "LOGIN FEHLGESCHLAGEN: Benutzername/Passwort prüfen, oder API-Zugriff/Quell-IP auf der Firewall nicht freigegeben."
             Write-Host "  Login fehlgeschlagen bei $Firewall" -ForegroundColor Red
+            $notizFw = 'Login fehlgeschlagen (API-Zugriff/Quell-IP/Konto prüfen)'
         } else {
             Add-Content $Datei "Login erfolgreich."
+            $erreicht = $true
 
             $rules = @($result.Response.FirewallRule)
             Add-Content $Datei "Regeln gesamt: $($rules.Count)"
@@ -182,8 +205,9 @@ foreach ($Firewall in $FirewallListe) {
                 }
             }
 
-            if ($offen.Count -gt 0) {
-                Add-Content $Datei "Offene Freigaben von WAN (SourceZone=WAN, Action=Accept): $($offen.Count)"
+            $offenListe = @($offen | Where-Object { $_ })
+            if ($offenListe.Count -gt 0) {
+                Add-Content $Datei "Offene Freigaben von WAN (SourceZone=WAN, Action=Accept): $($offenListe.Count)"
                 foreach ($o in $offen) {
                     Add-Content $Datei ("  {0} | Status:{1} | Ziel-Zone:{2} | Ziel-Netz:{3} | Dienste:{4} | Beschreibung:{5}" -f $o.Name, $o.Status, $o.ZielZone, $o.ZielNetz, $o.Dienste, $o.Beschreibung)
                 }
@@ -193,10 +217,28 @@ foreach ($Firewall in $FirewallListe) {
         }
     } catch {
         Add-Content $Datei "Fehler beim API-Zugriff: $($_.Exception.Message)"
+        $notizFw = "Fehler beim API-Zugriff: $($_.Exception.Message)"
     }
+
+    ## Firmware, Konfigurationssicherung und Log sind über die XML-API nicht prüfbar, daher keine Haken; nur die WAN-Freigaben stehen in den Werten
+    if ($erreicht) { $notizFw = "$($offenListe.Count) Freigabe(n) von WAN (Relevanz manuell prüfen)" }
+    $ergebnisListe.Add([pscustomobject]@{
+        Ziel       = $Firewall
+        Erreicht   = $erreicht
+        Pruefungen = [pscustomobject]@{}
+        Werte      = [pscustomobject]@{ WanFreigaben = @($offenListe | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Status = $_.Status; ZielZone = $_.ZielZone; ZielNetz = $_.ZielNetz; Dienste = $_.Dienste; Beschreibung = $_.Beschreibung } }) }
+        Notiz      = $notizFw
+    })
 }
 
 # - ABSCHLUSS
 Add-Content $Datei "`n===== Ende Sophos Kurzcheck ====="
 Write-Host ("Sophos Kurzcheck abgeschlossen. Datei gespeichert unter: {0}" -f $Datei) -ForegroundColor Yellow
+if ($Automatik) {
+    Get-Content -LiteralPath $Datei | Write-Host
+    Write-WtErgebnis -Skript '07.1-Firewall-Sophos' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    if (@($ergebnisListe | Where-Object { $_.Erreicht }).Count -eq 0) { exit 1 }
+    exit 0
+}
+
 Start-Process notepad.exe $Datei

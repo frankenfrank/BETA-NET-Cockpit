@@ -4,10 +4,19 @@
 param(
     [string]$Ziel,
     [string]$Ausgabeordner,
-    [pscredential]$Anmeldedaten
+    [pscredential]$Anmeldedaten,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-06.5-E-Mail-Security-NoSpamProxy ===" -ForegroundColor Cyan
 Write-Host ""
@@ -29,8 +38,10 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
@@ -42,6 +53,15 @@ $Days = 30
 $nspServer = if ([string]::IsNullOrWhiteSpace($Ziel)) { $env:COMPUTERNAME } else { $Ziel.Trim() }
 $ReportPath = Join-Path $Ausgabepfad ("Wartung_{0}_NoSpamProxy.txt" -f (Get-Date -Format "yyyyMMdd"))
 
+## Im Automatikmodus: Ergebnis mit Erreicht=false schreiben und beenden
+function Stop-NspAutomatik {
+    param([string]$Notiz)
+    if ($Automatik) {
+        Write-WtErgebnis -Skript '06.5-E-Mail-Security-NoSpamProxy' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $nspServer; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = $Notiz })
+        exit 1
+    }
+}
+
 # - VERBINDUNG ZUM NSP-SERVER (lokal oder per PowerShell Remoting)
 $nspLokal = ($nspServer -in @($env:COMPUTERNAME, "localhost", "127.0.0.1", "::1", ".")) -or ($nspServer -like "$env:COMPUTERNAME.*")
 $nspSitzung = $null
@@ -51,11 +71,11 @@ if (-not $nspLokal) {
     try {
         $nspSitzung = New-PSSession @sitzungParam
     } catch {
-        if (-not $Anmeldedaten) { Write-Host "Verbindung zu $nspServer fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red; return }
+        if (-not $Anmeldedaten -or $Automatik) { Write-Host "Verbindung zu $nspServer fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red; Stop-NspAutomatik 'Verbindung fehlgeschlagen'; return }
         Write-Host "Anmeldung mit dem Konto aus dem NET-COCKPIT fehlgeschlagen - Zugangsdaten abfragen" -ForegroundColor Yellow
         $sitzungParam.Credential = Get-Credential -Message "Zugangsdaten für $nspServer"
         try { $nspSitzung = New-PSSession @sitzungParam }
-        catch { Write-Host "Verbindung zu $nspServer fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red; return }
+        catch { Write-Host "Verbindung zu $nspServer fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red; Stop-NspAutomatik 'Verbindung fehlgeschlagen'; return }
     }
     ## $Days steht den Abfragen auf dem Server als globale Variable zur Verfügung
     Invoke-Command -Session $nspSitzung -ScriptBlock { param($tage) $global:Days = $tage } -ArgumentList $Days
@@ -80,9 +100,15 @@ function Invoke-NspStep {
 Write-Host "Fuehre Checks aus:" -ForegroundColor Cyan
 
 # 0. Verbindung zur NSP-API herstellen
-Invoke-NspStep -Title "Verbindung zur NoSpamProxy-API" -ScriptBlock {
-    Connect-Nsp -IgnoreServerCertificateErrors -ErrorAction Stop
-} | Out-Null
+try {
+    Invoke-NspStep -Title "Verbindung zur NoSpamProxy-API" -ScriptBlock {
+        Connect-Nsp -IgnoreServerCertificateErrors -ErrorAction Stop
+    } | Out-Null
+} catch {
+    Write-Host "Verbindung zur NoSpamProxy-API fehlgeschlagen: $($_.Exception.Message)" -ForegroundColor Red
+    Stop-NspAutomatik 'Verbindung zur NoSpamProxy-API fehlgeschlagen'
+    throw
+}
 
 $dateFrom = (Get-Date).AddDays(-$Days).ToString('yyyy-MM-dd')
 $dateTo   = (Get-Date).ToString('yyyy-MM-dd')
@@ -270,5 +296,28 @@ foreach ($line in $summary) { Write-Host $line -ForegroundColor White }
 Write-Host ""
 Write-Host " Report gespeichert: $ReportPath" -ForegroundColor Green
 Write-Host "=======================================================" -ForegroundColor Cyan
+
+if ($Automatik) {
+    Get-Content -LiteralPath $ReportPath | Write-Host
+
+    # - ERGEBNIS FÜR DIE CHECKLISTE (Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+    $pr = [ordered]@{}
+    $probleme = @()
+    if ($relay.QueueCount -ne -1) {
+        $pr['RelayOk'] = (($dispatcherErrorSum -eq 0) -and ($relay.QueueCount -le $queueWarnLevel) -and ($relay.Issues.Count -eq 0))
+        if (-not $pr['RelayOk']) { $probleme += $relayDetail }
+    }
+    $werte = [ordered]@{
+        RelayDetail       = $relayDetail
+        QuarantaeneMails  = $holdCount
+        Zertifikate       = @($certExpiries | ForEach-Object { [pscustomobject]@{ GueltigBis = $_.GueltigBis; Thumbprint = $_.Thumbprint; Betreff = $_.Betreff } })
+        EventlogWarnungen = $nspWarnCount
+        EventlogFehler    = $nspErrorCount
+    }
+    $notiz = "Quarantäne: $holdCount Mail(s)"
+    if ($probleme.Count -gt 0) { $notiz += '; ' + ($probleme -join '; ') }
+    Write-WtErgebnis -Skript '06.5-E-Mail-Security-NoSpamProxy' -Ordner $Ausgabepfad -Ergebnisse @([pscustomobject]@{ Ziel = $nspServer; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = $notiz })
+    exit 0
+}
 
 Invoke-Item $ReportPath

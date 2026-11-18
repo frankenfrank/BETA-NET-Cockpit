@@ -4,10 +4,19 @@
 param(
     [string[]]$Ziel,
     [string]$Ausgabeordner,
-    [hashtable]$AnmeldedatenJeZiel
+    [hashtable]$AnmeldedatenJeZiel,
+    [switch]$Automatik
 )
 
-Clear-Host
+# - ERGEBNIS FÜR DIE CHECKLISTE (nur mit -Automatik; alles Ausführliche steht auf der Konsole und kommt so in die Technikerinfo)
+function Write-WtErgebnis {
+    param([string]$Skript, [object[]]$Ergebnisse, [string]$Ordner)
+    if ([string]::IsNullOrWhiteSpace($Ordner)) { $Ordner = 'C:\Temp' }
+    if (-not (Test-Path -LiteralPath $Ordner)) { [void](New-Item -Path $Ordner -ItemType Directory -Force) }
+    [pscustomobject]@{ Skript = $Skript; Version = 1; Ergebnisse = @($Ergebnisse) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Ordner "Ergebnis_$Skript.json") -Encoding utf8
+}
+
+if (-not $Automatik) { Clear-Host }
 Write-Host ""
 Write-Host "=== Wartung-05.5-SQL-Server ===" -ForegroundColor Cyan
 Write-Host ""
@@ -33,13 +42,19 @@ VORAUSSETZUNGEN
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
-Read-Host | Out-Null
+if (-not $Automatik) {
+    Write-Host "Abbrechen mit [Strg] und [c], fortfahren mit [Enter] ..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+}
 
 # - AUSGABEORDNER (aus dem NET-COCKPIT, sonst C:\Temp)
 $Ausgabepfad = if ([string]::IsNullOrWhiteSpace($Ausgabeordner)) { "C:\Temp" } else { $Ausgabeordner.Trim() }
 if (-not (Test-Path -LiteralPath $Ausgabepfad)) { New-Item -ItemType Directory -Path $Ausgabepfad -Force | Out-Null }
 $ZielModus = (@($Ziel | Where-Object { "$_".Trim() -ne "" }).Count -gt 0)
+if ($Automatik -and -not $ZielModus) {
+    Write-Host "Abbruch: Im Automatikmodus ist -Ziel (SQL-Server) nötig." -ForegroundColor Red
+    exit 1
+}
 
 # - KONTEN JE ZIEL (aus dem NET-COCKPIT, Spalte "Konto")
 $script:AnmeldedatenHost = @{}
@@ -482,6 +497,7 @@ else {
     if ($Kandidaten.Count -eq 0) {
         Add-Content $Datei "Keine SQL-Instanzen gefunden (weder lokal noch per Netzwerk-Scan)."
         Write-Host "Keine SQL-Instanzen gefunden." -ForegroundColor Red
+        if ($Automatik) { exit 1 }
         Start-Process notepad.exe $Datei
         return
     }
@@ -528,6 +544,7 @@ foreach ($k in $Ausgewaehlt) {
         }
 
         for ($versuch = 1; $versuch -le $MaxLoginVersuche -and -not $verbunden; $versuch++) {
+            if ($Automatik) { break }
             $cred = Get-Credential -Message "Versuch $versuch/$MaxLoginVersuche – SQL-Zugangsdaten für '$si' (Benutzername leer lassen = Instanz überspringen)"
 
             if (-not $cred -or [string]::IsNullOrWhiteSpace($cred.UserName)) {
@@ -556,6 +573,11 @@ foreach ($k in $Ausgewaehlt) {
 if ($Instanzen.Count -eq 0) {
     Add-Content $Datei "Keine der ausgewählten Instanzen war erreichbar."
     Write-Host "Keine Instanz erreichbar. Skript wird beendet." -ForegroundColor Red
+    if ($Automatik) {
+        Get-Content -LiteralPath $Datei | Write-Host
+        Write-WtErgebnis -Skript '05.5-SQL-Server' -Ordner $Ausgabepfad -Ergebnisse @($Ausgewaehlt | ForEach-Object { [pscustomobject]@{ Ziel = $_.ServerInstance; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Instanz nicht erreichbar' } })
+        exit 1
+    }
     Start-Process notepad.exe $Datei
     return
 }
@@ -591,6 +613,9 @@ foreach ($inst in $Instanzen) {
 }
 
 # - SPEICHERPLATZ (Backup-Ziel-Laufwerke, je Server/Laufwerk nur einmal geprüft)
+$DriveWerte = @{}
+$ErrAnzahl = @{}
+$SsmsVersionen = @{}
 Add-Content $Datei "`n--- Speicherplatz Sicherungslaufwerk ---"
 $BackupTargetsSeen = New-Object System.Collections.Generic.HashSet[string]
 
@@ -603,6 +628,8 @@ foreach ($inst in $Instanzen) {
             [void]$AllBackupDriveLetters.Add($dl)
             $free = Get-RemoteDriveFree -ComputerName $inst.ComputerName -DriveLetter $dl
             if ($free) {
+                if (-not $DriveWerte.ContainsKey($inst.ComputerName)) { $DriveWerte[$inst.ComputerName] = @() }
+                $DriveWerte[$inst.ComputerName] += [pscustomobject]@{ Laufwerk = "${dl}:"; FreiGB = [double]$free.FreeGB; GroesseGB = [double]$free.TotalGB; FreiProzent = $(if ($free.TotalGB -gt 0) { [math]::Round($free.FreeGB / $free.TotalGB * 100, 1) } else { 0 }) }
                 Add-Content $Datei ("Laufwerk {0}: auf {1} – {2} GB frei von {3} GB" -f $dl, $inst.ComputerName, $free.FreeGB, $free.TotalGB)
                 $Proto.Speicherplaetze += ("{0} {1}: {2} GB frei von {3} GB" -f $inst.ComputerName, $dl, $free.FreeGB, $free.TotalGB)
             } else {
@@ -634,6 +661,7 @@ foreach ($inst in $Instanzen) {
     }
 
     $errEntries = Get-SqlErrorLogEntries -ServerInstance $si -Credential $cred
+    $ErrAnzahl[$si] = @($errEntries).Count
     if ($errEntries.Count -gt 0) {
         Add-Content $Datei "  Fehler-Einträge im aktuellen ERRORLOG (Suchbegriff 'Error:', letzte $($errEntries.Count)):"
         foreach ($e in $errEntries) {
@@ -657,6 +685,7 @@ foreach ($inst in $Instanzen) {
     if ($ssmsList -and $ssmsList.Count -gt 0) {
         foreach ($s in $ssmsList) {
             Add-Content $Datei ("{0}: Gefundene SSMS-Version: {1} | Pfad: {2}" -f $cn, $s.Version, $s.Path)
+            $SsmsVersionen[$cn] = [string]$s.Version
             $Proto.SsmsText = ("{0}: installiert Version {1}, `n-- Aktualität über Microsoft SSMS Release Notes prüfen: https://learn.microsoft.com/de-de/ssms/release-history" -f $cn, $s.Version)
         }
     } else {
@@ -694,7 +723,7 @@ foreach ($inst in $Instanzen) {
             if (-not $ExpressBackupPromptShown) {
                 Add-Content $Datei "  Optional: Manuelles FULL-Backup aller User-DBs (database_id > 4)."
                 Add-Content $Datei "  Backup-Ziel (Standard): $defaultBackupDir auf $($inst.ComputerName) (Dateien: <DBNAME>_<yyyyMMdd_HHmmss>_FULL.bak)"
-                $doBackupAllExpress = Read-Host "SQL Express ($si): Manuelles FULL-Backup aller User-DBs nach $defaultBackupDir ausführen? (j/n)"
+                $doBackupAllExpress = if ($Automatik) { 'n' } else { Read-Host "SQL Express ($si): Manuelles FULL-Backup aller User-DBs nach $defaultBackupDir ausführen? (j/n)" }
                 if ($doBackupAllExpress -eq 'j') {
                     try {
                         Invoke-OnComputer -ComputerName $inst.ComputerName -ScriptBlock {
@@ -955,4 +984,43 @@ Add-Content $Datei ("- Management Studio: {0}" -f $ssmsText)
 # - ABSCHLUSS
 Add-Content $Datei "`n===== Ende SQL Check ====="
 Write-Host ("SQL Kurzcheck abgeschlossen. Datei gespeichert unter: {0}" -f $Datei) -ForegroundColor Yellow
+
+if ($Automatik) {
+    Get-Content -LiteralPath $Datei | Write-Host
+
+    # - ERGEBNIS FÜR DIE CHECKLISTE (je Instanz; Haken = geprüft und in Ordnung; nur was ermittelt wurde, steht drin)
+    $erreichbar = @($Instanzen | ForEach-Object { $_.ServerInstance })
+    $ergebnisListe = [System.Collections.Generic.List[object]]::new()
+    foreach ($k in $Ausgewaehlt) {
+        $si = $k.ServerInstance
+        if ($si -notin $erreichbar) {
+            $ergebnisListe.Add([pscustomobject]@{ Ziel = $si; Erreicht = $false; Pruefungen = [pscustomobject]@{}; Werte = [pscustomobject]@{}; Notiz = 'Instanz nicht erreichbar (Anmeldung fehlgeschlagen)' })
+            continue
+        }
+        $pr = [ordered]@{}
+        $probleme = @()
+        $meta = $InstanceMeta[$si]
+        $werte = [ordered]@{}
+        if ($meta.Info) { $werte['Version'] = "$($meta.Info.ProductVersion) $($meta.Info.ProductLevel)"; $werte['Edition'] = $meta.Info.Edition }
+        $dbs = @($AllDbFindings | Where-Object { $_.Instanz -eq $si })
+        $werte['Datenbanken'] = $dbs.Count
+        if ($dbs.Count -gt 0) {
+            $schlecht = @($dbs | Where-Object { -not $_.FullOK -or ($_.Recovery -in @('FULL', 'BULK_LOGGED') -and -not $_.LogOK) })
+            $pr['SqlSicherungenAktuell'] = ($schlecht.Count -eq 0)
+            if ($schlecht.Count -gt 0) { $probleme += "Sicherung zu alt/fehlt: $(@($schlecht | ForEach-Object { $_.DB }) -join ', ')" }
+        }
+        if ($DriveWerte.ContainsKey($k.ComputerName)) {
+            $werte['Speicherplatz'] = @($DriveWerte[$k.ComputerName])
+            $pr['SpeicherplatzOk'] = (@($DriveWerte[$k.ComputerName] | Where-Object { $_.FreiProzent -lt 10 }).Count -eq 0)
+            if (-not $pr['SpeicherplatzOk']) { $probleme += 'Sicherungslaufwerk unter 10 % frei' }
+        }
+        $werte['Wartungsplaene'] = @($AllPlanFindings | Where-Object { $_.Instanz -eq $si }).Count
+        if ($ErrAnzahl.ContainsKey($si)) { $werte['FehlerImErrorlog'] = $ErrAnzahl[$si] }
+        if ($SsmsVersionen.ContainsKey($k.ComputerName)) { $werte['SsmsVersion'] = $SsmsVersionen[$k.ComputerName] }
+        $ergebnisListe.Add([pscustomobject]@{ Ziel = $si; Erreicht = $true; Pruefungen = [pscustomobject]$pr; Werte = [pscustomobject]$werte; Notiz = ($probleme -join '; ') })
+    }
+    Write-WtErgebnis -Skript '05.5-SQL-Server' -Ordner $Ausgabepfad -Ergebnisse $ergebnisListe.ToArray()
+    exit 0
+}
+
 Start-Process notepad.exe $Datei
