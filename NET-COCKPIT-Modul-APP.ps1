@@ -11,7 +11,7 @@
     - WAU installieren (Winget-AutoUpdate mit Ausschlussliste; Geräte mit WAU, auch der Intune-Variante, werden übersprungen) und WAU-Ausschlüsse bearbeiten (excluded_apps.txt der normalen Installation; die Intune-Variante wird nur erkannt)
     - Details je Gerät: verfügbare Updates, Cockpit-Verlauf, WAU-Verlauf und Log
     Verbindung, Konten, Warteschlange, Neustart, Neustart planen, OU-Import und Liste kommen aus dem NET-COCKPIT.
-    Log je Gerät: C:\Temp\NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt
+    Log je Gerät: C:\Temp\BETA-NET-COCKPIT_data\Modul-APP\yyyyMMdd_Gerät_app-log.txt
 #>
 
 # Einstellungen
@@ -44,8 +44,7 @@ New-WolSpalte -Key 'WauStatus' -Titel 'WAU' -Eig '[WauStatus]' -Breite 70 -Sicht
 $script:AppKopf = @'
 $log = 'C:\Windows\Temp\NetCockpitAppInstall.log'
 $fehlerAnzahl = 0
-if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
-$verlaufDatei = 'C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv'
+$verlaufDatei = 'C:\ProgramData\BETA-NET-COCKPIT\WingetVerlauf.csv'
 
 ### Eine Zeile in den Verlauf schreiben
 function Add-Verlauf {
@@ -246,8 +245,7 @@ try {
 
     ### Verlauf der Installationen durch das Cockpit (letzte 50 Einträge, neueste zuerst)
     $verlauf = New-Object System.Collections.Generic.List[object]
-    if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
-    $datei = 'C:\ProgramData\NET-COCKPIT\WingetVerlauf.csv'
+    $datei = 'C:\ProgramData\BETA-NET-COCKPIT\WingetVerlauf.csv'
     if (Test-Path -Path $datei) {
         foreach ($zeile in @(Get-Content -Path $datei -Encoding UTF8 | Select-Object -Last 50)) {
             $t = @($zeile -split ';')

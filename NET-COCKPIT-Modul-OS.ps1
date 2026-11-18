@@ -12,7 +12,7 @@
     - Update-Modul (PSWindowsUpdate) nachinstallieren; danach läuft automatisch Status prüfen
     - Details je Gerät: verfügbare Updates, Update-Verlauf und Log
     Verbindung, Konten, Warteschlange, Neustart, Neustart planen, OU-Import und Liste kommen aus dem NET-COCKPIT.
-    Log je Gerät: C:\Temp\NET-COCKPIT_data\Modul-OS\yyyyMMdd_Gerät_os-log.txt
+    Log je Gerät: C:\Temp\BETA-NET-COCKPIT_data\Modul-OS\yyyyMMdd_Gerät_os-log.txt
 #>
 
 # Einstellungen

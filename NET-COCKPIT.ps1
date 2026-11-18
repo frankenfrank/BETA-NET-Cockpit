@@ -9,7 +9,7 @@
     - Scannt ein Netz per Ping, liest MAC-Adressen aus der ARP-Tabelle und Hersteller aus der IEEE-OUI-Liste
     - Liest die Computer einer OU aus dem Active Directory (LDAP, kein RSAT nötig)
     - Geräteliste als Semikolon-getrennte Textdatei; Speichern ohne bekannte Datei fragt nach Name und Ort, Auto-Speichern schreibt nur in die zuletzt geöffnete oder gespeicherte Datei
-    - Datenordner C:\Temp\NET-COCKPIT_data: Logdatei, Herstellerliste, Einstellungen (Optionen und Spalten), die von den Modulen ausgelesenen Werte (NET-COCKPIT-werte.json) und pro Gerät die ausgelesenen KuDo-Informationen und die gespeicherten Listen der Module OS, APP und Treiber (Unterordner Geraeteinfos); Optionen > "NET-COCKPIT Daten löschen..." entfernt alles
+    - Datenordner C:\Temp\BETA-NET-COCKPIT_data: Logdatei, Herstellerliste, Einstellungen (Optionen und Spalten), die von den Modulen ausgelesenen Werte (NET-COCKPIT-werte.json) und pro Gerät die ausgelesenen KuDo-Informationen und die gespeicherten Listen der Module OS, APP und Treiber (Unterordner Geraeteinfos); Optionen > "NET-COCKPIT Daten löschen..." entfernt alles
     - Neustart, Neustart planen (Aufgabe auf dem Zielgerät), Neustart abbrechen und Herunterfahren per WinRM
     - Aufträge an mehrere Geräte laufen in einer Warteschlange; die Parallelität (Standard 10) ist in den Optionen einstellbar
     - Ampel: Grün = Ping + WinRM (Port 5985), Gelb = nur Ping, Rot = offline
@@ -69,7 +69,7 @@ Add-WolStartMarke 'Bibliotheken geladen'
 # Einstellungen
 ## Pfade
 $script:ArbeitsOrdner     = 'C:\Temp'
-$script:DatenOrdner       = Join-Path $script:ArbeitsOrdner 'NET-COCKPIT_data'
+$script:DatenOrdner       = Join-Path $script:ArbeitsOrdner 'BETA-NET-COCKPIT_data'
 $script:GeraeteOrdner     = Join-Path $script:DatenOrdner 'Geraeteinfos'
 $script:LogPfad           = Join-Path $script:DatenOrdner 'NET-COCKPIT.log'
 $script:OuiPfad           = Join-Path $script:DatenOrdner 'NET-COCKPIT-oui.csv'
@@ -1937,7 +1937,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Auto-Speichern** (Optionen) schreibt nach Scan, Statusprüfung und Portscan, aber nur in die bekannte Datei. Ohne bekannte Datei bleibt es still, im Log steht ein Hinweis.' }
         @{ T = 'i'; X = 'Beim Beenden und beim Öffnen einer anderen Liste fragt das Cockpit bei ungespeicherten Änderungen nach; ohne bekannte Datei mit Dateidialog.' }
         @{ T = 'h'; X = 'Datenordner' }
-        @{ T = 'p'; X = 'Alles, was das Cockpit selbst ablegt, liegt in **C:\Temp\NET-COCKPIT_data** (wird beim Start angelegt): **NET-COCKPIT.log** (bei jedem Start geleert), **NET-COCKPIT-oui.csv** (Herstellerliste), **NET-COCKPIT-einstellungen.json** (Optionen und Spalten), **NET-COCKPIT-werte.json** (die von den Modulen ausgelesenen Werte je Gerät) und der Unterordner **Geraeteinfos** mit den KuDo-Informationen je Gerät. Darin liegt je Gerät ein Ordner mit den gespeicherten Listen der Module OS, APP und Treiber (Updates, Verlauf, installierte Programme, jeweils mit dem Zeitpunkt "gelesen am"). Die Ausgaben der Wartungsskripte (Modul WaToKi) liegen im Unterordner **Modul-WaToKi**.' }
+        @{ T = 'p'; X = 'Alles, was das Cockpit selbst ablegt, liegt in **C:\Temp\BETA-NET-COCKPIT_data** (wird beim Start angelegt): **NET-COCKPIT.log** (bei jedem Start geleert), **NET-COCKPIT-oui.csv** (Herstellerliste), **NET-COCKPIT-einstellungen.json** (Optionen und Spalten), **NET-COCKPIT-werte.json** (die von den Modulen ausgelesenen Werte je Gerät) und der Unterordner **Geraeteinfos** mit den KuDo-Informationen je Gerät. Darin liegt je Gerät ein Ordner mit den gespeicherten Listen der Module OS, APP und Treiber (Updates, Verlauf, installierte Programme, jeweils mit dem Zeitpunkt "gelesen am"). Die Ausgaben der Wartungsskripte (Modul WaToKi) liegen im Unterordner **Modul-WaToKi**.' }
         @{ T = 'i'; X = '**Optionen > NET-COCKPIT Daten löschen...:** löscht nach einer Rückfrage den ganzen Ordner und beendet das Cockpit. Listen an anderen Orten und Exporte bleiben. Lässt sich etwas nicht löschen (Datei gesperrt), bleibt das Cockpit offen und nennt die betroffenen Dateien. Der nächste Start ist ein normaler Erststart.' }
     ) })
 
@@ -1967,7 +1967,7 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**ESXi-Hosts:** werden an der Shell erkannt (uname -s = VMkernel) und per esxcli gelesen: Hersteller, Modell, Seriennummer, ESXi-Version, CPU, Kerne, RAM, Datenspeicher und IP-Adressen mit MAC. Rollen zeigt "Virtualisierung (ESXi)"; Updates und Letzter Start sind nicht ermittelbar. Das Konto braucht SSH-Zugang (am ESXi-Host muss SSH gestartet sein).' }
         @{ T = 'i'; X = '**Was bei Linux gelesen wird:** ohne Root und ohne sudo, nur lesende Befehle: Hostname, Distribution, Kernel, CPU, RAM, Laufwerke, IPs und MACs, Laufzeit, letzter Start und ausstehende Updates (nach dem Stand der Paketlisten; bei dnf nur mit vorhandenem Cache). Gefüllt werden dieselben Felder wie bei Windows-Servern, soweit es sie gibt; Windows-spezifische Felder (zum Beispiel RAID, Notizen, Installationsdatum) und alles, was ohne Root nicht lesbar ist (oft die Seriennummer), bleiben leer. Der Typ kommt aus der Spalte "Typ", sonst wird virtuell erkannt (systemd-detect-virt, DMI), sonst gilt Server physisch.' }
         @{ T = 'h'; X = 'Herstellerliste' }
-        @{ T = 'i'; X = '**Hersteller-Namen laden:** lädt die Zuordnung "MAC-Präfix zu Hersteller" von der IEEE (ersatzweise von Wireshark) nach C:\Temp\NET-COCKPIT_data\NET-COCKPIT-oui.csv. Einmal laden reicht; der Hersteller erscheint ab dem nächsten Scan. Der Scan lädt nichts selbst.' }
+        @{ T = 'i'; X = '**Hersteller-Namen laden:** lädt die Zuordnung "MAC-Präfix zu Hersteller" von der IEEE (ersatzweise von Wireshark) nach C:\Temp\BETA-NET-COCKPIT_data\NET-COCKPIT-oui.csv. Einmal laden reicht; der Hersteller erscheint ab dem nächsten Scan. Der Scan lädt nichts selbst.' }
         @{ T = 'h'; X = 'Portscan' }
         @{ T = 'i'; X = '**Portscan...:** für die markierten Geräte. Ein Fenster fragt nach den Ports (vorausgefüllt 1-1024, Einzelports und Bereiche, bis 1-65535). Offen heißt: die TCP-Verbindung kommt zustande. Rote Geräte werden übersprungen, bis zu drei Geräte gleichzeitig. **Portscan abbrechen** stoppt laufende und wartende Scans.' }
         @{ T = 'w'; X = 'Eine Firewall oder ein IPS im Netz kann einen Portscan melden.' }
@@ -2014,7 +2014,7 @@ function Get-WolInfoInhalt {
     @{ T = 'i'; X = '**Start über start.ps1:** Das Cockpit lädt ein Modul beim ersten Aufruf vom Server (Ladefenster) und prüft es gegen seine Signatur. Ohne gültige Signatur wird nichts geladen.' }
     @{ T = 'i'; X = '**Geräte, die Ping blockieren,** werden als offline (Rot) angezeigt.' }
     @{ T = 'h'; X = 'Log' }
-    @{ T = 'p'; X = 'C:\Temp\NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
+    @{ T = 'p'; X = 'C:\Temp\BETA-NET-COCKPIT_data\NET-COCKPIT.log (wird bei jedem Programmstart geleert)' }
         ) }
         @{ Titel = 'Freischaltung per GPO (Domäne)'; Bloecke = @(
             @{ T = 'h'; X = 'Wofür?' }
@@ -2514,7 +2514,7 @@ function Show-WolDetails {
 }
 
 # Einstellungsdatei
-## Optionen und Spaltenauswahl speichern (C:\Temp\NET-COCKPIT_data\NET-COCKPIT-einstellungen.json)
+## Optionen und Spaltenauswahl speichern (C:\Temp\BETA-NET-COCKPIT_data\NET-COCKPIT-einstellungen.json)
 function Save-WolEinstellungen {
     if ($script:DatenLoeschen) { return }
     try {

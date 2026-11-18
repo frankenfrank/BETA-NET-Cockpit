@@ -11,7 +11,7 @@
     - Treiber-Tool nachinstallieren (Dell: WinGet, HP: HPCMSL, Lenovo: LSUClient); danach läuft automatisch Status prüfen
     - Details je Gerät: verfügbare Treiber, Verlauf, Tool-Log und Log
     Verbindung, Konten, Warteschlange, Neustart, Neustart planen, OU-Import, Liste und KuDo-Info kommen aus dem NET-COCKPIT.
-    Log je Gerät: C:\Temp\NET-COCKPIT_data\Modul-TREIBER\yyyyMMdd_Gerät_treiber-log.txt
+    Log je Gerät: C:\Temp\BETA-NET-COCKPIT_data\Modul-TREIBER\yyyyMMdd_Gerät_treiber-log.txt
 #>
 
 # Einstellungen
@@ -35,11 +35,10 @@ New-WolSpalte -Key 'TrUpdates' -Titel 'Treiber-Updates' -Eig '[TrUpdates]' -Brei
 ## Gemeinsame Bibliothek (Herstellererkennung, Suche und Installation je Hersteller)
 $script:TrLib = @'
 $mitBios       = __MITBIOS__
-if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
-$ordnerDaten   = 'C:\ProgramData\NET-COCKPIT'
-$verlaufDatei  = 'C:\ProgramData\NET-COCKPIT\TreiberVerlauf.csv'
-$toolLogDatei  = 'C:\ProgramData\NET-COCKPIT\TreiberToolLog.txt'
-$hpiaOrdner    = 'C:\ProgramData\NET-COCKPIT\HPIA'
+$ordnerDaten   = 'C:\ProgramData\BETA-NET-COCKPIT'
+$verlaufDatei  = 'C:\ProgramData\BETA-NET-COCKPIT\TreiberVerlauf.csv'
+$toolLogDatei  = 'C:\ProgramData\BETA-NET-COCKPIT\TreiberToolLog.txt'
+$hpiaOrdner    = 'C:\ProgramData\BETA-NET-COCKPIT\HPIA'
 
 if (-not (Test-Path -Path $ordnerDaten)) { New-Item -ItemType Directory -Path $ordnerDaten -Force | Out-Null }
 if ((Test-Path -Path $toolLogDatei) -and ((Get-Item -Path $toolLogDatei).Length -gt 1MB)) {
@@ -612,10 +611,9 @@ $script:TrBlock = {
         param([string]$Hersteller)
         $hat = Invoke-Command @ic -ArgumentList $Hersteller -ScriptBlock {
             param($h)
-            if (-not (Test-Path -Path 'C:\ProgramData\NET-COCKPIT') -and (Test-Path -Path 'C:\ProgramData\WaToKi')) { Rename-Item -Path 'C:\ProgramData\WaToKi' -NewName 'NET-COCKPIT' -ErrorAction SilentlyContinue }
             switch ($h) {
                 'Dell'   { return [bool](@("$env:ProgramFiles\Dell\CommandUpdate\dcu-cli.exe", "${env:ProgramFiles(x86)}\Dell\CommandUpdate\dcu-cli.exe") | Where-Object { Test-Path -Path $_ }) }
-                'HP'     { return [bool](Get-ChildItem -Path 'C:\ProgramData\NET-COCKPIT\HPIA' -Recurse -Filter 'HPImageAssistant.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) }
+                'HP'     { return [bool](Get-ChildItem -Path 'C:\ProgramData\BETA-NET-COCKPIT\HPIA' -Recurse -Filter 'HPImageAssistant.exe' -ErrorAction SilentlyContinue | Select-Object -First 1) }
                 'Lenovo' { return [bool](Get-Module -ListAvailable -Name LSUClient) }
                 default  { return $false }
             }
