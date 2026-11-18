@@ -250,7 +250,7 @@ function script:Start-WolWtSkript {
         }
         catch { $c.TxtStatus.Text = $_.Exception.Message; return }
         if ($konto) {
-            $anmeldeDatei = Join-Path ([System.IO.Path]::GetTempPath()) ('NET-COCKPIT_Anmeldung_' + [guid]::NewGuid().ToString('N') + '.xml')
+            $anmeldeDatei = Join-Path ([System.IO.Path]::GetTempPath()) ('BETA-NET-COCKPIT_Anmeldung_' + [guid]::NewGuid().ToString('N') + '.xml')
             try { $konto | Export-Clixml -LiteralPath $anmeldeDatei -ErrorAction Stop }
             catch { $c.TxtStatus.Text = "Die Anmeldedaten konnten nicht übergeben werden: $($_.Exception.Message)"; return }
             $script:WtAnmeldeDatei = $anmeldeDatei
