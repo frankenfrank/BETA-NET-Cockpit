@@ -94,7 +94,7 @@ $BlockGroesse = 10
 $script:Credential = $null
 
 # - RESERVED FÜR ZUSATZLOGS JE ROLLE
-$BasisLogs = @("Application","System")
+$BasisLogs = @("Application","System","Security")
 
 $RolleLogMap = @(
     [PSCustomObject]@{ Match = "Active Directory-Domänendienste|Active Directory Domain Services"; Logs = @("Directory Service","DFS Replication") }
@@ -579,6 +579,7 @@ for ($b = 0; $b -lt $AnzahlBloecke; $b++) {
         $pr = [ordered]@{}
         if ($gelesen -contains 'Application') { $pr['Anwendung'] = $true }
         if ($gelesen -contains 'System') { $pr['System'] = $true }
+        if ($gelesen -contains 'Security') { $pr['Sicherheit'] = $true }
         if ($gelesen -contains 'Directory Service') { $pr['ActiveDirectory'] = $true }
         if ($gelesen -contains 'DNS Server') { $pr['DNS'] = $true }
         if ($gelesen -contains 'Microsoft-Windows-Dhcp-Server/Operational') { $pr['DHCP'] = $true }

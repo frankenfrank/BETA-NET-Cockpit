@@ -19,7 +19,8 @@
     - Vor dem Start fragt das Cockpit fehlende Kennwörter der Konten ab (einmal pro Benutzername)
     - Knopf "Automatik stoppen": beendet das laufende Skript, startet die übrigen nicht mehr (Status abgebrochen) und speichert die bisherigen Ergebnisse
     - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die Notiz aus der Ergebnisdatei in der Meldung, sonst die letzte Konsolenzeile)
-    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Gesamtdatei.json (maschinenlesbar für den Warterator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts)
+    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Autowartung-Gesamtdatei.json (maschinenlesbar für den Wartinator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts) und Techniker-Uebersicht.html (wie die Wartungscheckliste gegliedert, Fehler und Auffälligkeiten oben, als PDF druckbar)
+    - Knopf Automatik prüfen: testet vorab je Gerät Name, Ping, WinRM-/SSH-Anmeldung und nötige Module (nur lesend) und zeigt einen Bericht (wird auch als Automatik-Pruefung_<Datum>.txt gespeichert)
     - Vertrag für die Skripte: ein Skript mit -Automatik fragt nichts ab, öffnet nichts und schreibt seine Werte für die Checkliste als Ergebnis_<Skriptname ohne Wartung- und .ps1>.json in -Ausgabeordner (wird unverändert in die Gesamtdatei übernommen); alles Ausführliche gibt es auf der Konsole aus (landet in Detail.txt)
     Sonst speichert das Modul nichts.
 #>
@@ -46,6 +47,8 @@ $script:WtTimer = $null
 $script:WtAnmeldeDatei = ''
 $script:WtLauf = $null
 $script:WtAutoTimer = $null
+$script:WtPruefJob = $null
+$script:WtPruefTimer = $null
 
 ## Spalte in der Tabelle (bearbeitbar; der Kern speichert den Wert mit der Geräteliste)
 New-WolSpalte -Key 'Wartungsreihenfolge' -Titel 'Wartungsreihenfolge' -Eig '[Wartungsreihenfolge]' -Breite 120 -NurLesen $false -Sichtbar $false -Modul 'WATOKI'
@@ -186,6 +189,12 @@ function script:Update-WolWtStatus {
     $c = $script:WtC
     if (-not $c.TxtStatus) { return }
     if ($c.BtnStop) { $c.BtnStop.IsEnabled = [bool]$script:WtLauf }
+    if ($c.BtnPruef) { $c.BtnPruef.IsEnabled = -not ($script:WtLauf -or $script:WtPruefJob -or (Test-WolWtLaeuft)) }
+    if ($script:WtPruefJob) {
+        $c.BtnStart.IsEnabled = $false
+        if ($c.BtnAuto) { $c.BtnAuto.IsEnabled = $false }
+        return
+    }
     if ($script:WtLauf) {
         $c.BtnStart.IsEnabled = $false
         if ($c.BtnAuto) { $c.BtnAuto.IsEnabled = $false }
@@ -439,7 +448,164 @@ function script:Add-WolWtErgebnis {
     Write-WolLog "WaToKi-Automatik: $($Item.Skript.Name) $Status$(if ($Meldung) { ' (' + $Meldung + ')' })"
 }
 
-## Lauf abschließen: Gesamtdatei.json und Detail.txt schreiben
+## Techniker-Übersicht: HTML-Datei (als PDF druckbar), gegliedert wie die Wartungscheckliste
+function script:ConvertTo-WolWtWertHtml {
+    param($Wert)
+    $e = { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
+    $istObjekt = { param($o) $null -ne $o -and $o.GetType().FullName -eq 'System.Management.Automation.PSCustomObject' }
+    if ($null -eq $Wert) { return '' }
+    if ($Wert -is [bool]) { return $(if ($Wert) { 'Ja' } else { 'Nein' }) }
+    if ($Wert -is [datetime]) { return $Wert.ToString('dd.MM.yyyy HH:mm:ss') }
+    if ($Wert -is [string] -or $Wert.GetType().IsPrimitive -or $Wert -is [decimal]) { return ((& $e $Wert) -replace "`r?`n", '<br>') }
+    if ($Wert -is [System.Collections.IEnumerable]) {
+        $liste = @($Wert)
+        if ($liste.Count -eq 0) { return '–' }
+        if (-not @($liste | Where-Object { -not (& $istObjekt $_) }).Count) {
+            $spalten = @($liste | ForEach-Object { $_.PSObject.Properties.Name } | Select-Object -Unique)
+            $gew = @(foreach ($sp in $spalten) { $max = 0; foreach ($z in $liste) { $l = ([string]$z.$sp).Length; if ($l -gt $max) { $max = $l } }; [math]::Min([math]::Max([math]::Max($max, $sp.Length), 11), 70) })
+            $summe = ($gew | Measure-Object -Sum).Sum
+            $cols = '<colgroup>' + (($gew | ForEach-Object { '<col style="width:' + [math]::Round(100 * $_ / $summe, 1).ToString([cultureinfo]::InvariantCulture) + '%">' }) -join '') + '</colgroup>'
+            $kopf = ($spalten | ForEach-Object { '<th>' + (& $e $_) + '</th>' }) -join ''
+            $zeilen = foreach ($z in $liste) {
+                $zellen = foreach ($sp in $spalten) { $zelle = $z.$sp; '<td>' + (ConvertTo-WolWtWertHtml -Wert $zelle) + '</td>' }
+                '<tr>' + ($zellen -join '') + '</tr>'
+            }
+            return "<table class='w'>$cols<tr>$kopf</tr>$($zeilen -join '')</table>"
+        }
+        return '<ul>' + (($liste | ForEach-Object { '<li>' + (ConvertTo-WolWtWertHtml -Wert $_) + '</li>' }) -join '') + '</ul>'
+    }
+    if (& $istObjekt $Wert) {
+        $zeilen = foreach ($p in $Wert.PSObject.Properties) { $wp = $p.Value; '<tr><th>' + (& $e $p.Name) + '</th><td>' + (ConvertTo-WolWtWertHtml -Wert $wp) + '</td></tr>' }
+        return "<table class='w'><colgroup><col style='width:35%'><col></colgroup>$($zeilen -join '')</table>"
+    }
+    return (& $e $Wert)
+}
+
+function script:New-WolWtTechnikerHtml {
+    param($Gesamt, [string]$Pfad)
+    $e = { param($t) [System.Net.WebUtility]::HtmlEncode([string]$t) }
+    $kurzZiel = { param($z) $s = ([string]$z).Trim(); if ($s -match '^\d+(\.\d+){3}$') { $s } else { ($s -split '\.')[0] } }
+    $eig = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.PSObject.Properties[$n].Value } else { $null } }
+    $pruefText = @{
+        Anwendung = 'Ereignisprotokoll Anwendung geprüft'; System = 'Ereignisprotokoll System geprüft'; Sicherheit = 'Ereignisprotokoll Sicherheit geprüft'
+        ActiveDirectory = 'Ereignisprotokoll Active Directory geprüft'; DNS = 'Ereignisprotokoll DNS geprüft'; DHCP = 'Ereignisprotokoll DHCP geprüft'
+        Dateiserver = 'Ereignisprotokoll Dateiserver geprüft'; DiensteGestartet = 'Alle automatisch startenden Dienste gestartet'
+        Speicherplatz = 'Freier Speicherplatz (mindestens 10 % je Laufwerk)'; SpeicherplatzOk = 'Speicherplatz ausreichend'
+        RaidHdd = 'RAID / HDDs in Ordnung'; Firmware = 'Firmware'; Bios = 'BIOS'; Netzteile = 'Netzteile'; BackupErfolgreich = 'Datensicherung erfolgreich'
+        BatterieOk = 'Status der Batterie in Ordnung'; UsvErreichbar = 'USV erreichbar'; CentralBerichteGeprueft = 'Sophos-Central-Berichte geprüft'
+        ClusterOk = 'Cluster läuft'; HostsVerbunden = 'Hosts verbunden'; DagOk = 'DAG-Konsistenzprüfung'; FirmwareAktuell = 'Firmware aktuell'
+        IntegrationsdiensteOk = 'Integrationsdienste aktuell'; InternetOnline = 'Internetverbindung online'; KeineSnapshots = 'Keine veralteten Snapshots'
+        KonfigSicherung = 'Konfigurationssicherung vorhanden'; LogGeprueft = 'Log auf erfolgreiche Angriffe geprüft'; RelayOk = 'E-Mail-Relay funktioniert'
+        ReplikationOk = 'Hyper-V-Replikation funktioniert'; SeamlessKeyOk = 'Seamless-SSO-Key aktuell'; SqlSicherungenAktuell = 'SQL-Sicherungen aktuell'
+        SyncOk = 'Entra-Synchronisierung fehlerfrei'; VmsLaufen = 'VMs laufen'; VmwareToolsOk = 'VMware Tools aktuell'
+        WindowsUpdates = 'Windows-Updates aktuell (letztes Update höchstens 60 Tage alt)'; ZertifikateGueltig = 'Zertifikate gültig'
+        DcdiagOk = 'dcdiag fehlerfrei'; RootHintsOk = 'Root-Hints entsprechen der offiziellen Liste'
+    }
+    $bereichText = @{
+        '02.2' = 'Datensicherung'; '03.1' = 'Hardware physische Server'; '03.2' = 'Protokolle Server / NAS'; '04.1' = 'Protokolle virtuelle Server'
+        '05.1' = 'Virtualisierung'; '05.2' = 'Exchange'; '05.3' = 'Active Directory'; '05.4' = 'MailStore'; '05.5' = 'SQL-Server'
+        '06.2' = 'Entra Connect'; '06.5' = 'E-Mail-Security'; '07.1' = 'Firewall'; '07.3' = 'Updates'
+        '08.1' = 'Router'; '08.2' = 'Switche'; '08.4' = 'NAS'; '08.5' = 'USV'; '09.4' = 'Telefonanlage'
+    }
+    $pText = { param($k) if ($pruefText.ContainsKey($k)) { $pruefText[$k] } else { ($k -creplace '([a-z])([A-Z])', '$1 $2') } }
+    $dienstListe = { param($w) @($w) | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -and $_ -notmatch '^Status\s+StartType' -and $_ -notmatch '^-+(\s|$)' } | ForEach-Object { $_ -replace '^Stopped\s+Automatic\s+', '' } }
+    $datum = { param($t) if ($t -is [datetime]) { $t.ToString('dd.MM.yyyy HH:mm:ss') } else { $d = [datetime]::MinValue; if ([datetime]::TryParse([string]$t, [ref]$d)) { $d.ToString('dd.MM.yyyy HH:mm:ss') } else { [string]$t } } }
+    $skripte = @($Gesamt.Skripte)
+
+    # Fehler und Auffälligkeiten einsammeln
+    $fehler = [System.Collections.Generic.List[string]]::new()
+    $auff = [System.Collections.Generic.List[string]]::new()
+    foreach ($s in $skripte) {
+        if ($s.Status -ne 'OK') { $fehler.Add('<b>' + (& $e $s.Skript) + '</b>: ' + (& $e $s.Status) + $(if ($s.Meldung) { ' – ' + (& $e $s.Meldung) } else { '' })) }
+        $erg = & $eig $s.Ergebnis 'Ergebnisse'
+        foreach ($r in @($erg)) {
+            if ($null -eq $r) { continue }
+            $ziel = & $kurzZiel $r.Ziel
+            if (-not $r.Erreicht) {
+                $fehler.Add('<b>' + (& $e $s.Skript) + '</b>, ' + (& $e $ziel) + ': nicht erreicht' + $(if ($r.Notiz) { ' – ' + (& $e $r.Notiz) } else { '' }))
+                continue
+            }
+            $w = & $eig $r 'Werte'
+            foreach ($p in @($r.Pruefungen.PSObject.Properties | Where-Object { $_.Value -eq $false })) {
+                $det = ''
+                if ($p.Name -eq 'DiensteGestartet') { $d = @(& $dienstListe (& $eig $w 'DiensteGestoppt')); if ($d.Count) { $det = ': ' + (($d | ForEach-Object { & $e $_ }) -join ', ') } }
+                if ($p.Name -eq 'Speicherplatz') { $d = @(@(& $eig $w 'Speicherplatz') | Where-Object { $_ -and $_.FreiProzent -lt 10 } | ForEach-Object { (& $e $_.Laufwerk) + ' ' + $_.FreiProzent + ' % frei (' + $_.FreiGB + ' GB)' }); if ($d.Count) { $det = ': ' + ($d -join ', ') } }
+                $txt = switch ($p.Name) { 'DiensteGestartet' { 'Automatisch startende Dienste gestoppt' } 'Speicherplatz' { 'Freier Speicherplatz unter 10 %' } default { (& $pText $p.Name) + ': nicht in Ordnung' } }
+                $auff.Add('<b>' + (& $e $ziel) + '</b>, ' + (& $e $s.Skript) + ': ' + (& $e $txt) + $det)
+            }
+            if ($r.Notiz -and @($r.Pruefungen.PSObject.Properties | Where-Object { $_.Value -eq $false }).Count) { $auff.Add('<b>' + (& $e $ziel) + '</b>, ' + (& $e $s.Skript) + ': Hinweis des Skripts – ' + (& $e $r.Notiz)) }
+        }
+    }
+    foreach ($u in @($Gesamt.Unbekannt)) { if ($u) { $fehler.Add('Unbekannter Skriptname in der Wartungsreihenfolge: ' + (& $e $u)) } }
+
+    $h = [System.Text.StringBuilder]::new()
+    [void]$h.AppendLine('<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Techniker-Übersicht Autowartung</title><style>')
+    [void]$h.AppendLine('@page{size:A4;margin:12mm}body{font:10pt/1.35 Segoe UI,Arial,sans-serif;color:#111;margin:0 auto;max-width:190mm}h1{font-size:18pt;margin:0 0 4px}h2{font-size:14pt;border-bottom:2px solid #333;padding-bottom:2px;margin:22px 0 8px;break-after:avoid}h3{font-size:11.5pt;margin:14px 0 4px;break-after:avoid}h4{font-size:10pt;margin:8px 0 3px}')
+    [void]$h.AppendLine('table{border-collapse:collapse;width:100%;margin:4px 0;table-layout:fixed}th,td{border:1px solid #bbb;padding:2px 5px;vertical-align:top;text-align:left;overflow-wrap:anywhere}table.m td:first-child,table.m th:first-child{width:46%}th{background:#eee}table.w{font-size:8.5pt;margin:0}table.w th,table.w td{overflow-wrap:anywhere}table.w th{background:#f5f5f5;font-weight:600}tr{break-inside:avoid}ul{margin:0;padding-left:16px}')
+    [void]$h.AppendLine('.ok{color:#0a6b2d;font-weight:600}.bad{color:#b00020;font-weight:600}.na{color:#777}.box{border:2px solid #b00020;background:#fdecee;padding:6px 10px;margin:10px 0;break-inside:avoid}.box.gut{border-color:#0a6b2d;background:#e9f6ee}.box.gelb{border-color:#b26a00;background:#fff4e0}.meta{color:#444;font-size:9pt}')
+    [void]$h.AppendLine('.badge{font-size:8.5pt;padding:1px 6px;border-radius:8px;border:1px solid #999;margin-left:6px;font-weight:600}.seite{break-before:page}pre{white-space:pre-wrap;font:8pt/1.3 Consolas,monospace;border:1px solid #ccc;padding:6px;background:#fafafa}.notiz{margin:3px 0}')
+    [void]$h.AppendLine('</style></head><body>')
+    [void]$h.AppendLine('<h1>Techniker-Übersicht Autowartung</h1>')
+    $z = $Gesamt.Zusammenfassung
+    [void]$h.AppendLine('<div class="meta">Lauf: ' + (& $e (& $datum $Gesamt.Start)) + ' bis ' + (& $e (& $datum $Gesamt.Ende)) + ' &middot; Rechner: ' + (& $e $Gesamt.Rechner) + ' &middot; ' + (& $e $z.OK) + ' OK, ' + (& $e $z.Uebersprungen) + ' übersprungen, ' + (& $e $z.Fehler) + ' Fehler' + $(if ($z.Abgebrochen -gt 0) { ', ' + $z.Abgebrochen + ' abgebrochen' } else { '' }) + '</div>')
+    if ($fehler.Count) { [void]$h.AppendLine('<div class="box"><b>Fehler beim Auslesen (' + $fehler.Count + ')</b><ul>' + (($fehler | ForEach-Object { '<li>' + $_ + '</li>' }) -join '') + '</ul></div>') }
+    else { [void]$h.AppendLine('<div class="box gut"><b>Keine Fehler beim Auslesen.</b> Alle Skripte liefen durch, alle Ziele wurden erreicht.</div>') }
+    if ($auff.Count) { [void]$h.AppendLine('<div class="box gelb"><b>Auffälligkeiten (' + $auff.Count + ')</b><ul>' + (($auff | ForEach-Object { '<li>' + $_ + '</li>' }) -join '') + '</ul></div>') }
+    else { [void]$h.AppendLine('<div class="box gut"><b>Keine Auffälligkeiten</b> in den ausgelesenen Prüfungen.</div>') }
+
+    # Gliederung wie die Checkliste: je Seite (erste zwei Ziffern des Skripts), darin je Skript
+    $gruppen = $skripte | Group-Object { ([string]$_.Skript).Substring(0, 2) } | Sort-Object Name
+    foreach ($g in $gruppen) {
+        [void]$h.AppendLine('<h2 class="seite">Checkliste Seite ' + [int]$g.Name + '</h2>')
+        foreach ($s in ($g.Group | Sort-Object Skript)) {
+            $nr = ([string]$s.Skript).Substring(0, 4)
+            $titel = $(if ($bereichText.ContainsKey($nr)) { & $e $bereichText[$nr] } else { & $e $s.Skript })
+            $cls = $(if ($s.Status -eq 'OK') { 'ok' } else { 'bad' })
+            [void]$h.AppendLine('<h3>' + $nr + ' ' + $titel + '<span class="badge ' + $cls + '">' + (& $e $s.Status) + '</span></h3>')
+            [void]$h.AppendLine('<div class="meta">Skript: ' + (& $e $s.Skript) + ' &middot; Ziele: ' + $(if (@($s.Ziele).Count) { (@($s.Ziele) | ForEach-Object { & $e (& $kurzZiel $_) }) -join ', ' } else { '-' }) + ' &middot; Dauer: ' + (& $e $s.Sekunden) + ' s' + $(if ($s.Meldung) { ' &middot; Meldung: ' + (& $e $s.Meldung) } else { '' }) + '</div>')
+            $erg = @(& $eig $s.Ergebnis 'Ergebnisse') | Where-Object { $null -ne $_ }
+            if (-not $erg.Count) { [void]$h.AppendLine('<p class="bad">Kein Ergebnis vom Skript.</p>'); continue }
+            # Matrix: Prüfung x Ziel
+            $schluessel = @($erg | ForEach-Object { if ($_.Pruefungen) { $_.Pruefungen.PSObject.Properties.Name } } | Select-Object -Unique)
+            if ($schluessel.Count) {
+                $kopf = '<tr><th>Prüfung</th>' + (($erg | ForEach-Object { '<th>' + (& $e (& $kurzZiel $_.Ziel)) + '</th>' }) -join '') + '</tr>'
+                $zeilen = foreach ($k in $schluessel) {
+                    $zellen = foreach ($r in $erg) {
+                        $v = $(if ($r.Erreicht -and $r.Pruefungen) { & $eig $r.Pruefungen $k } else { $null })
+                        if ($v -eq $true) { '<td class="ok">&#10004; OK</td>' } elseif ($v -eq $false) { '<td class="bad">&#10006; Auffällig</td>' } elseif (-not $r.Erreicht) { '<td class="na">nicht erreicht</td>' } else { '<td class="na">keine Angabe</td>' }
+                    }
+                    '<tr><td>' + (& $e (& $pText $k)) + '</td>' + ($zellen -join '') + '</tr>'
+                }
+                [void]$h.AppendLine('<table class="m">' + $kopf + ($zeilen -join '') + '</table>')
+            }
+            # Notizen und alle Werte je Ziel
+            foreach ($r in $erg) {
+                $zn = & $e (& $kurzZiel $r.Ziel)
+                [void]$h.AppendLine('<h4>' + $zn + $(if ($r.Erreicht) { '' } else { ' <span class="bad">&ndash; nicht erreicht</span>' }) + '</h4>')
+                if ($r.Notiz) { [void]$h.AppendLine('<div class="notiz"><b>Notiz:</b> ' + (& $e $r.Notiz) + '</div>') }
+                $w = & $eig $r 'Werte'
+                if ($w -and @($w.PSObject.Properties).Count) {
+                    $zw = foreach ($p in $w.PSObject.Properties) {
+                        $wert = $p.Value
+                        if ($p.Name -eq 'DiensteGestoppt') { $wert = @(& $dienstListe $wert) }
+                        '<tr><th style="width:30%">' + (& $e $p.Name) + '</th><td>' + (ConvertTo-WolWtWertHtml -Wert $wert) + '</td></tr>'
+                    }
+                    [void]$h.AppendLine('<table>' + ($zw -join '') + '</table>')
+                }
+            }
+        }
+    }
+    # Anhang: Konsolenausgabe der Skripte
+    [void]$h.AppendLine('<h2 class="seite">Anhang: Konsolenausgabe der Skripte</h2>')
+    foreach ($s in $skripte) {
+        $k = ([string]$s.Konsole) -replace '\x1B\[[0-9;]*[A-Za-z]', ''
+        [void]$h.AppendLine('<h3>' + (& $e $s.Skript) + '</h3>' + $(if ($k.Trim()) { '<pre>' + (& $e $k.TrimEnd()) + '</pre>' } else { '<p class="na">Keine Ausgabe.</p>' }))
+    }
+    [void]$h.AppendLine('</body></html>')
+    $h.ToString() | Set-Content -LiteralPath $Pfad -Encoding utf8BOM
+}
+
+## Lauf abschließen: Autowartung-Gesamtdatei.json und Detail.txt schreiben
 function script:Complete-WolWtAutomatik {
     $l = $script:WtLauf
     $script:WtAutoTimer.Stop()
@@ -456,7 +622,7 @@ function script:Complete-WolWtAutomatik {
             Zusammenfassung = [pscustomobject]@{ OK = [int]$zaehl['OK']; Uebersprungen = [int]$zaehl['übersprungen']; Fehler = [int]$zaehl['Fehler']; Abgebrochen = [int]$zaehl['abgebrochen'] }
             Skripte      = @($l.Ergebnisse | ForEach-Object { [pscustomobject]@{ Skript = $_.Skript; Ziele = $_.Ziele; Status = $_.Status; Meldung = $_.Meldung; Start = $_.Start; Ende = $_.Ende; Sekunden = $_.Sekunden; Ergebnis = $_.Ergebnis } })
         }
-        $gesamt | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath (Join-Path $l.Ordner 'Gesamtdatei.json') -Encoding utf8
+        $gesamt | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath (Join-Path $l.Ordner 'Autowartung-Gesamtdatei.json') -Encoding utf8
         $text = [System.Collections.Generic.List[string]]::new()
         $text.Add('WaToKi Automatiklauf')
         $text.Add("Start : $($l.Start.ToString('dd.MM.yyyy HH:mm:ss'))")
@@ -473,6 +639,8 @@ function script:Complete-WolWtAutomatik {
             if ($e.Konsole) { $text.Add($e.Konsole.TrimEnd()) }
         }
         ($text -join "`r`n") | Set-Content -LiteralPath (Join-Path $l.Ordner 'Detail.txt') -Encoding utf8BOM
+        try { New-WolWtTechnikerHtml -Gesamt $gesamt -Pfad (Join-Path $l.Ordner 'Techniker-Uebersicht.html') }
+        catch { Write-WolLog "WaToKi-Automatik: Techniker-Übersicht nicht geschrieben: $($_.Exception.Message)" }
         Write-WolLog "WaToKi-Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }) ($($l.Ordner))"
         $meldung = "Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }). Ordner: $($l.Ordner)"
     }
@@ -611,7 +779,7 @@ function script:Stop-WolWtAutomatik {
 
 ## Automatiklauf starten (Knopf "Automatik starten")
 function script:Start-WolWtAutomatik {
-    if ($script:WtLauf -or (Test-WolWtLaeuft)) { Update-WolWtStatus; return }
+    if ($script:WtLauf -or $script:WtPruefJob -or (Test-WolWtLaeuft)) { Update-WolWtStatus; return }
     $c = $script:WtC
     $p = New-WolWtPlan
     if ($p.Plan.Count -eq 0) {
@@ -621,8 +789,12 @@ function script:Start-WolWtAutomatik {
         return
     }
     $bereit = @($p.Plan | Where-Object { $_.Skript.HatAutomatik -and -not $_.Skript.Fehler })
-    $text = "Automatiklauf starten?`r`n`r`n$($p.Plan.Count) Aufruf/Aufrufe, davon $($bereit.Count) bereit für -$($script:WtParamAutomatik); die übrigen werden mit dem Status übersprungen eingetragen.`r`nJeder Aufruf hat ein Zeitlimit von $($script:WtLimitMinuten) Minuten."
+    $geraete = @($bereit | ForEach-Object { $_.Zeilen } | ForEach-Object { Get-WolZielName -Zeile $_ } | Select-Object -Unique).Count
+    $text = "Die Automatik läuft jetzt los: $($bereit.Count) Skriptaufrufe" + $(if ($geraete -gt 0) { " für $geraete Geräte" } else { '' }) + ".`r`n`r`nDas Ergebnis liegt danach im Ausgabeordner. Mit dem Knopf 'Automatik stoppen' lässt sich der Lauf jederzeit beenden."
+    $ohneAuto = @($p.Plan | Where-Object { -not ($_.Skript.HatAutomatik -and -not $_.Skript.Fehler) } | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Skript.Name) -replace '^Wartung-', '' } | Select-Object -Unique)
+    if ($ohneAuto.Count -gt 0) { $text += "`r`n`r`nNicht dabei (Skript noch ohne Automatik-Modus): " + ($ohneAuto -join ', ') }
     if ($p.Unbekannt.Count -gt 0) { $text += "`r`n`r`nUnbekannte Skriptnamen (werden ignoriert): " + ($p.Unbekannt -join '; ') }
+    $text += "`r`n`r`nJetzt starten?"
     $antwort = [System.Windows.MessageBox]::Show($text, 'NET-COCKPIT', 'YesNo', 'Question')
     if ($antwort -ne 'Yes') { return }
     ### Fehlende Kennwörter der Konten jetzt abfragen (einmal pro Benutzername), statt Skripte zu überspringen
@@ -655,6 +827,348 @@ function script:Start-WolWtAutomatik {
     Start-WolWtAutoNaechstes
 }
 
+## Verbindungsart eines Skripts (für die Automatik-Prüfung), aus dem Skriptnamen abgeleitet
+function script:Get-WolWtTransport {
+    param([string]$Name)
+    $n = ($Name -replace '^Wartung-', '' -replace '\.ps1$', '')
+    switch -Regex ($n) {
+        '^(03\.2|04\.1)-' { return 'Windows-Ereignislog' }
+        '^07\.3-' { return 'Windows-CIM' }
+        '^05\.1-Virtualisierung_(ESXi|vCenter)' { return 'vSphere' }
+        '^(02\.2-Backup-Veeam|05\.[1-5]-|06\.2-|06\.5-)' { return 'WinRM' }
+        '^03\.1-physServerIPMI' { return 'IPMI' }
+        '^(07\.1-Firewall-Fortigate|08\.2-|08\.4-NAS-QNAP)' { return 'SSH' }
+        '^(07\.1-Firewall-Sophos_Central|09\.4-Starface)' { return 'Cloud' }
+        '^(03\.1-physServeriDRAC|02\.2-Backup-Synology|07\.1-Firewall-Sophos|08\.1-|08\.4-NAS-Synology)' { return 'Web' }
+        '^08\.5-' { return 'SNMP' }
+        '^09\.4-3CX' { return 'WinRM-oder-SSH' }
+        default { return 'Unbekannt' }
+    }
+}
+
+## Aufgaben der Prüfung: je Gerät und Verbindungsart eine Aufgabe (mit Konto und Kennwort aus der Sitzung)
+function script:New-WolWtPruefAufgaben {
+    param($Plan)
+    $aufgaben = @{}
+    $probleme = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $Plan) {
+        $s = $item.Skript
+        $kurz = [System.IO.Path]::GetFileNameWithoutExtension($s.Name) -replace '^Wartung-', ''
+        if (-not $s.HatAutomatik) { $probleme.Add("${kurz}: kennt den Parameter -$($script:WtParamAutomatik) noch nicht (wird im Lauf übersprungen)"); continue }
+        if ($s.Fehler) { $probleme.Add("${kurz}: $($s.Fehler)"); continue }
+        if (-not $s.HatZiel) { $probleme.Add("${kurz}: wählt seine Geräte selbst, die Verbindung lässt sich hier nicht prüfen"); continue }
+        $transport = Get-WolWtTransport -Name $s.Name
+        $brauchtKonto = [bool]($s.HatAnmeldung -or $s.HatAnmeldungJeZiel)
+        foreach ($z in $item.Zeilen) {
+            $ziel = Get-WolZielName -Zeile $z
+            $key = ("$ziel|$transport|" + [string]$z.Konto).ToLowerInvariant()
+            if (-not $aufgaben.ContainsKey($key)) {
+                $cred = $null
+                $kwFehlt = $false
+                try { $cred = Get-WolAnmeldung -Zeile $z } catch { $kwFehlt = $true }
+                $aufgaben[$key] = [pscustomobject]@{ Ziel = $ziel; Transport = $transport; Skripte = [System.Collections.Generic.List[string]]::new(); Konto = [string]$z.Konto; Cred = $cred; KennwortFehlt = $kwFehlt; BrauchtKonto = $brauchtKonto }
+            }
+            elseif ($brauchtKonto) { $aufgaben[$key].BrauchtKonto = $true }
+            if (-not $aufgaben[$key].Skripte.Contains($kurz)) { $aufgaben[$key].Skripte.Add($kurz) }
+        }
+    }
+    $liste = @($aufgaben.Values | Sort-Object Ziel, Transport | ForEach-Object {
+        $_.Skripte = @($_.Skripte)
+        $_
+    })
+    return [pscustomobject]@{ Aufgaben = $liste; Probleme = @($probleme) }
+}
+
+## Läuft als Thread-Job: prüft je Aufgabe Name, Ping, Port und Anmeldung (nur lesend, je Gerät höchstens ein Anmeldeversuch)
+$script:WtPruefBlock = {
+    param($Aufgaben, [string]$SshText)
+    $Aufgaben | ForEach-Object -ThrottleLimit 8 -Parallel {
+        $a = $_
+        $sshText = $using:SshText
+        $ProgressPreference = 'SilentlyContinue'
+        $pr = [System.Collections.Generic.List[object]]::new()
+        $ok = { param($t) $pr.Add([pscustomobject]@{ Status = 'OK'; Text = $t }) }
+        $hin = { param($t) $pr.Add([pscustomobject]@{ Status = 'Hinweis'; Text = $t }) }
+        $feh = { param($t) $pr.Add([pscustomobject]@{ Status = 'Fehler'; Text = $t }) }
+        $kurzFehler = { param($e) $m = (([string]$e.Exception.Message) -replace '\s+', ' ').Trim(); if ($m.Length -gt 260) { $m.Substring(0, 257) + '...' } else { $m } }
+        $tcp = { param($h, $p) $c = [System.Net.Sockets.TcpClient]::new(); try { $t = $c.ConnectAsync($h, $p); ($t.Wait(3000) -and $c.Connected) } catch { $false } finally { $c.Dispose() } }
+        $ziel = [string]$a.Ziel
+        $wer = $(if ($a.Konto) { [string]$a.Konto } else { 'angemeldetes Windows-Konto' })
+
+        $winrm = {
+            $p5985 = & $tcp $ziel 5985
+            $p5986 = & $tcp $ziel 5986
+            if (-not $p5985 -and -not $p5986) { & $feh 'WinRM-Port 5985/5986 nicht erreichbar (Firewall oder WinRM nicht aktiviert).'; return }
+            & $ok ('WinRM-Port ' + $(if ($p5985) { '5985' } else { '5986' }) + ' erreichbar')
+            try {
+                $so = New-PSSessionOption -OpenTimeout 20000 -OperationTimeout 30000
+                $p = @{ ComputerName = $ziel; SessionOption = $so; ErrorAction = 'Stop' }
+                if ($a.Cred) { $p.Credential = $a.Cred }
+                if (-not $p5985) { $p.UseSSL = $true }
+                $r = Invoke-Command @p -ScriptBlock { [pscustomobject]@{ Name = $env:COMPUTERNAME; Admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } }
+                & $ok "WinRM-Anmeldung OK ($wer)"
+                if (-not $r.Admin) { & $hin 'Das Konto hat in der Sitzung keine Administratorrechte (die meisten Skripte brauchen sie).' }
+            }
+            catch { & $feh ('WinRM-Anmeldung fehlgeschlagen: ' + (& $kurzFehler $_)) }
+        }
+        $cim = {
+            $p5985 = & $tcp $ziel 5985
+            $p5986 = & $tcp $ziel 5986
+            if (-not $p5985 -and -not $p5986) { & $feh 'WinRM-Port 5985/5986 nicht erreichbar (Firewall oder WinRM nicht aktiviert).'; return $false }
+            & $ok ('WinRM-Port ' + $(if ($p5985) { '5985' } else { '5986' }) + ' erreichbar')
+            $cs = $null
+            try {
+                $cp = @{ ComputerName = $ziel; ErrorAction = 'Stop'; OperationTimeoutSec = 20 }
+                if ($a.Cred) { $cp.Credential = $a.Cred }
+                $cs = New-CimSession @cp
+                [void](Get-CimInstance -CimSession $cs -ClassName Win32_OperatingSystem -OperationTimeoutSec 20 -ErrorAction Stop)
+                & $ok "CIM-Abfrage OK ($wer)"
+                return $true
+            }
+            catch { & $feh ('CIM-Abfrage fehlgeschlagen: ' + (& $kurzFehler $_)); return $false }
+            finally { if ($cs) { Remove-CimSession -CimSession $cs -ErrorAction SilentlyContinue } }
+        }
+        $ssh = {
+            if (-not (& $tcp $ziel 22)) { & $feh 'SSH-Port 22 nicht erreichbar.'; return }
+            & $ok 'SSH-Port 22 erreichbar'
+            if (-not (Get-Module -ListAvailable -Name Posh-SSH)) { & $feh 'PowerShell-Modul Posh-SSH ist nicht installiert.'; return }
+            if (-not $a.Cred) { & $feh 'Kein Konto mit Kennwort für den SSH-Login vorhanden.'; return }
+            $res = & ([scriptblock]::Create($sshText)) $ziel $a.Cred
+            if ($res.Erfolg) { & $ok "SSH-Anmeldung OK ($wer)" } else { & $feh ('SSH-Anmeldung fehlgeschlagen: ' + (([string]$res.Fehler -replace '\s+', ' ').Trim())) }
+        }
+
+        try {
+            $netz = $true
+            $cloud = ($a.Transport -eq 'Cloud')
+            if ($a.KennwortFehlt) { & $feh "Für das Konto $($a.Konto) liegt in dieser Sitzung kein Kennwort vor (Anmeldung nicht prüfbar)." }
+            elseif ($a.BrauchtKonto -and -not $a.Konto -and $a.Transport -in 'SSH', 'Web', 'SNMP', 'Cloud', 'vSphere') { & $feh 'Kein Konto in der Geräteliste, das Skript braucht Anmeldedaten.' }
+            if (-not $cloud) {
+                if ($ziel -notmatch '^\d+(\.\d+){3}$') {
+                    try { $ips = @([System.Net.Dns]::GetHostAddresses($ziel)); & $ok ('Name aufgelöst: ' + $ips[0].IPAddressToString) }
+                    catch { & $feh 'Name lässt sich nicht auflösen (DNS).'; $netz = $false }
+                }
+                if ($netz) {
+                    if (Test-Connection -TargetName $ziel -Count 1 -TimeoutSeconds 2 -Quiet -ErrorAction SilentlyContinue) { & $ok 'Ping antwortet' }
+                    else { & $hin 'Ping ohne Antwort (Ping kann gesperrt sein).' }
+                }
+            }
+            if ($netz) {
+                switch ($a.Transport) {
+                    'WinRM' { & $winrm }
+                    'Windows-CIM' { [void](& $cim) }
+                    'Windows-Ereignislog' {
+                        [void](& $cim)
+                        if (& $tcp $ziel 135) {
+                            & $ok 'RPC-Port 135 erreichbar'
+                            try {
+                                $gp = @{ ComputerName = $ziel; LogName = 'System'; MaxEvents = 1; ErrorAction = 'Stop' }
+                                if ($a.Cred) { $gp.Credential = $a.Cred }
+                                [void](Get-WinEvent @gp)
+                                & $ok 'Ereignisprotokoll lesbar'
+                            }
+                            catch {
+                                if ($_.FullyQualifiedErrorId -match 'NoMatchingEventsFound') { & $ok 'Ereignisprotokoll lesbar' }
+                                else { & $feh ('Ereignisprotokoll nicht lesbar: ' + (& $kurzFehler $_)) }
+                            }
+                        }
+                        else { & $feh 'RPC-Port 135 nicht erreichbar (Ereignisprotokoll aus der Ferne, Firewall-Regeln für die Remote-Ereignisprotokollverwaltung).' }
+                    }
+                    'SSH' { & $ssh }
+                    'WinRM-oder-SSH' {
+                        if ((& $tcp $ziel 5985) -or (& $tcp $ziel 5986)) { & $winrm }
+                        elseif (& $tcp $ziel 22) { & $ssh }
+                        else { & $feh 'Weder WinRM (5985/5986) noch SSH (22) erreichbar.' }
+                    }
+                    'Web' {
+                        $offen = @(foreach ($port in 443, 4444, 5001, 8443, 80) { if (& $tcp $ziel $port) { $port } })
+                        if ($offen.Count) { & $ok ('Webdienst erreichbar (Port ' + ($offen -join ', ') + ')'); & $hin 'Die Anmeldung an der Schnittstelle (API/Web) wird erst im Lauf geprüft.' }
+                        else { & $feh 'Kein Webport (443, 4444, 5001, 8443, 80) erreichbar.' }
+                    }
+                    'vSphere' {
+                        if (& $tcp $ziel 443) { & $ok 'Port 443 erreichbar' } else { & $feh 'Port 443 nicht erreichbar.' }
+                        if (-not (Get-Module -ListAvailable -Name 'VMware.VimAutomation.Core')) { & $feh 'VMware PowerCLI ist nicht installiert.' }
+                        else { & $hin 'Die Anmeldung am vCenter/ESXi wird erst im Lauf geprüft.' }
+                    }
+                    'SNMP' {
+                        if (-not (Get-Module -ListAvailable -Name SNMP)) { & $feh 'PowerShell-Modul SNMP ist nicht installiert.' }
+                        else { & $hin 'SNMP (UDP 161) lässt sich von hier nicht vorab prüfen, die Abfrage wird erst im Lauf geprüft.' }
+                    }
+                    'IPMI' {
+                        if (-not (Test-Path -LiteralPath 'C:\tools\ipmitool\ipmiutil.exe')) { & $feh 'ipmiutil fehlt (C:\tools\ipmitool\ipmiutil.exe).' }
+                        else { & $hin 'IPMI wird erst im Lauf geprüft.' }
+                    }
+                    'Cloud' { }
+                    default { & $hin 'Verbindungsart dieses Skripts ist unbekannt, es wurden nur Name und Ping geprüft.' }
+                }
+            }
+            if ($cloud) {
+                $h = (($ziel -replace '^https?://', '') -split '[/:]')[0]
+                if ($h -match '^[\w-]+(\.[\w-]+)+$') { if (& $tcp $h 443) { & $ok "Internetzugriff auf $h (Port 443) erreichbar" } else { & $feh "$h (Port 443) nicht erreichbar." } }
+                else { & $hin 'Cloud-Dienst: die Verbindung lässt sich von hier nicht vorab prüfen.' }
+            }
+        }
+        catch { & $feh ('Prüfung abgebrochen: ' + (& $kurzFehler $_)) }
+        [pscustomobject]@{ Ziel = $a.Ziel; Transport = $a.Transport; Skripte = @($a.Skripte); Konto = $a.Konto; Pruefungen = @($pr.ToArray()) }
+    }
+}
+
+## Bericht der Prüfung als Text
+function script:New-WolWtPruefBericht {
+    param($Aufgaben, $Ergebnisse, $Probleme, [bool]$Zeitlimit)
+    $nach = @{}
+    foreach ($e in @($Ergebnisse)) { if ($e) { $nach[("$($e.Ziel)|$($e.Transport)|$($e.Konto)").ToLowerInvariant()] = $e } }
+    $liste = foreach ($a in @($Aufgaben)) {
+        $key = ("$($a.Ziel)|$($a.Transport)|$($a.Konto)").ToLowerInvariant()
+        if ($nach.ContainsKey($key)) { $nach[$key] }
+        else { [pscustomobject]@{ Ziel = $a.Ziel; Transport = $a.Transport; Skripte = @($a.Skripte); Konto = $a.Konto; Pruefungen = @([pscustomobject]@{ Status = 'Fehler'; Text = 'Keine Antwort innerhalb des Zeitlimits.' }) } }
+    }
+    $liste = @($liste)
+    $schlecht = @($liste | Where-Object { @($_.Pruefungen | Where-Object { $_.Status -eq 'Fehler' }).Count -gt 0 })
+    $gut = @($liste | Where-Object { @($_.Pruefungen | Where-Object { $_.Status -eq 'Fehler' }).Count -eq 0 })
+    $arten = @{ 'WinRM' = 'WinRM'; 'Windows-CIM' = 'Windows (CIM)'; 'Windows-Ereignislog' = 'Windows (CIM, Ereignisprotokoll)'; 'SSH' = 'SSH'; 'Web' = 'Web/API'; 'vSphere' = 'vSphere'; 'SNMP' = 'SNMP'; 'IPMI' = 'IPMI'; 'Cloud' = 'Cloud'; 'WinRM-oder-SSH' = 'WinRM oder SSH'; 'Unbekannt' = 'unbekannt' }
+    $kopf = { param($e) "$($e.Ziel) · $(if ($arten.ContainsKey([string]$e.Transport)) { $arten[[string]$e.Transport] } else { $e.Transport }) · Skripte: $(@($e.Skripte) -join ', ')" }
+    $t = [System.Collections.Generic.List[string]]::new()
+    $t.Add('Automatik-Prüfung vom ' + (Get-Date -Format 'dd.MM.yyyy HH:mm'))
+    $geraete = @($liste | ForEach-Object { $_.Ziel } | Select-Object -Unique).Count
+    $t.Add("Geräte: $geraete · Verbindungen: $($liste.Count) · bereit: $($gut.Count) · nicht bereit: $($schlecht.Count)")
+    if ($Zeitlimit) { $t.Add('Achtung: Die Prüfung wurde nach dem Zeitlimit beendet, nicht beantwortete Verbindungen stehen unter "nicht bereit".') }
+    if ($schlecht.Count -gt 0) {
+        $t.Add('')
+        $t.Add('NICHT BEREIT')
+        foreach ($e in $schlecht) {
+            $t.Add((& $kopf $e))
+            foreach ($p in @($e.Pruefungen)) {
+                $marke = switch ($p.Status) { 'OK' { '[OK]     ' } 'Fehler' { '[FEHLER] ' } default { '[Hinweis]' } }
+                $t.Add("  $marke $($p.Text)")
+            }
+        }
+    }
+    if ($gut.Count -gt 0) {
+        $t.Add('')
+        $t.Add('BEREIT')
+        foreach ($e in $gut) {
+            $hinweise = @($e.Pruefungen | Where-Object { $_.Status -eq 'Hinweis' } | ForEach-Object { $_.Text })
+            $t.Add("[OK] $(& $kopf $e)")
+            foreach ($h in $hinweise) { $t.Add("       Hinweis: $h") }
+        }
+    }
+    if (@($Probleme).Count -gt 0) {
+        $t.Add('')
+        $t.Add('SKRIPTE')
+        foreach ($p in @($Probleme)) { $t.Add("  $p") }
+    }
+    $t.Add('')
+    $t.Add('Die Prüfung zeigt, ob Verbindung und Anmeldung möglich sind. Ob die Abfragen selbst ein Ergebnis liefern, zeigt erst der Lauf.')
+    return [pscustomobject]@{ Text = ($t -join "`r`n"); Gut = $gut.Count; Schlecht = $schlecht.Count; Geraete = $geraete }
+}
+
+## Bericht im Fenster zeigen und im Ausgabeordner speichern
+function script:Show-WolWtPruefBericht {
+    param([string]$Text)
+    $datei = ''
+    try {
+        $datei = Join-Path (Get-WolWtAusgabeOrdner) ('Automatik-Pruefung_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.txt')
+        $Text | Set-Content -LiteralPath $datei -Encoding utf8BOM -ErrorAction Stop
+    }
+    catch { $datei = '' }
+    $f = New-WolFenster @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Automatik-Prüfung" Width="900" Height="640" MinWidth="520" MinHeight="320" WindowStartupLocation="CenterOwner">
+  <Grid Margin="12">
+    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <TextBox x:Name="TxtBericht" IsReadOnly="True" FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+      <Button x:Name="BtnKopieren" Content="Kopieren" Padding="14,6" Margin="0,0,8,0"/>
+      <Button x:Name="BtnZu" Content="Schließen" Padding="14,6" Margin="0,0,16,0"/>
+      <TextBlock x:Name="TxtDatei" VerticalAlignment="Center" Foreground="DimGray"/>
+    </StackPanel>
+  </Grid>
+</Window>
+'@
+    $f.Owner = $script:Fenster
+    $f.FindName('TxtBericht').Text = $Text
+    $f.FindName('TxtDatei').Text = $(if ($datei) { "Gespeichert: $datei" } else { '' })
+    $f.FindName('BtnKopieren').Add_Click({ try { [System.Windows.Clipboard]::SetText($Text) } catch { } }.GetNewClosure())
+    $f.FindName('BtnZu').Add_Click({ $f.Close() }.GetNewClosure())
+    $f.Show()
+}
+
+## Prüfung beenden: Ergebnisse einsammeln, Bericht zeigen
+function script:Complete-WolWtPruefung {
+    param([bool]$Zeitlimit = $false)
+    $pj = $script:WtPruefJob
+    if (-not $pj) { return }
+    if ($script:WtPruefTimer) { $script:WtPruefTimer.Stop() }
+    $erg = @()
+    try { $erg = @(Receive-Job -Job $pj.Job -ErrorAction SilentlyContinue) } catch { }
+    try { Stop-Job -Job $pj.Job -ErrorAction SilentlyContinue; Remove-Job -Job $pj.Job -Force -ErrorAction SilentlyContinue } catch { }
+    $script:WtPruefJob = $null
+    $b = New-WolWtPruefBericht -Aufgaben $pj.Aufgaben -Ergebnisse $erg -Probleme $pj.Probleme -Zeitlimit $Zeitlimit
+    Write-WolLog "WaToKi-Prüfung: $($b.Gut) bereit, $($b.Schlecht) nicht bereit ($($b.Geraete) Geräte)"
+    if ($script:WtC.TxtStatus) { $script:WtC.TxtStatus.Text = "Prüfung fertig: $($b.Gut) bereit, $($b.Schlecht) nicht bereit." }
+    Update-WolWtStatus
+    Show-WolWtPruefBericht -Text $b.Text
+}
+
+## Timer: Fortschritt der Prüfung anzeigen, bei Ende oder Zeitlimit abschließen
+function script:Watch-WolWtPruefung {
+    $pj = $script:WtPruefJob
+    if (-not $pj) { if ($script:WtPruefTimer) { $script:WtPruefTimer.Stop() }; return }
+    $laeuft = ($pj.Job.State -eq 'Running' -or $pj.Job.State -eq 'NotStarted')
+    if ($laeuft -and ((Get-Date) - $pj.Start).TotalMinutes -lt 10) {
+        $fertig = 0
+        try { $fertig = @(Receive-Job -Job $pj.Job -Keep -ErrorAction SilentlyContinue).Count } catch { }
+        if ($script:WtC.TxtStatus) { $script:WtC.TxtStatus.Text = "Prüfung läuft: $fertig von $($pj.Aufgaben.Count) Verbindungen geprüft." }
+        return
+    }
+    Complete-WolWtPruefung -Zeitlimit $laeuft
+}
+
+## Kontrollknopf "Automatik prüfen": geht alle Geräte des Plans durch und prüft, ob die Automatik laufen würde (nur lesend)
+function script:Start-WolWtPruefung {
+    if ($script:WtLauf -or $script:WtPruefJob -or (Test-WolWtLaeuft)) { Update-WolWtStatus; return }
+    $c = $script:WtC
+    $p = New-WolWtPlan
+    if ($p.Plan.Count -eq 0) {
+        $hinweis = "In der Spalte Wartungsreihenfolge steht bei keinem Gerät ein bekannter Skriptname (Beispiel: 05.1-VirtServer-HyperV)."
+        if ($p.Unbekannt.Count -gt 0) { $hinweis += "`r`n`r`nUnbekannt: " + ($p.Unbekannt -join '; ') }
+        Show-WolMeldung $hinweis 'Information'
+        return
+    }
+    ### Fehlende Kennwörter jetzt abfragen (einmal pro Benutzername), sonst lässt sich die Anmeldung nicht testen
+    $bereit = @($p.Plan | Where-Object { $_.Skript.HatAutomatik -and -not $_.Skript.Fehler -and $_.Skript.HatZiel })
+    $kontoMenge = [System.Collections.Generic.HashSet[object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+    foreach ($item in @($bereit | Where-Object { $_.Skript.HatAnmeldung -or $_.Skript.HatAnmeldungJeZiel })) {
+        foreach ($z in $item.Zeilen) { [void]$kontoMenge.Add($z) }
+    }
+    $kontoZeilen = @($kontoMenge)
+    if ($kontoZeilen.Count -gt 0 -and -not (Resolve-WolKonten -Zeilen $kontoZeilen -Besitzer $script:WtFenster)) {
+        $c.TxtStatus.Text = 'Prüfung nicht gestartet: Die Kennwortabfrage wurde abgebrochen.'
+        return
+    }
+    $a = New-WolWtPruefAufgaben -Plan $p.Plan
+    $probleme = @($a.Probleme)
+    if ($p.Unbekannt.Count -gt 0) { $probleme += ('Unbekannte Skriptnamen (werden ignoriert): ' + ($p.Unbekannt -join '; ')) }
+    if ($a.Aufgaben.Count -eq 0) {
+        $b = New-WolWtPruefBericht -Aufgaben @() -Ergebnisse @() -Probleme $probleme -Zeitlimit $false
+        Show-WolWtPruefBericht -Text $b.Text
+        return
+    }
+    try { $job = Start-ThreadJob -ScriptBlock $script:WtPruefBlock -ArgumentList $a.Aufgaben, $script:SshPruefBlock.ToString() }
+    catch { $c.TxtStatus.Text = "Die Prüfung konnte nicht gestartet werden: $($_.Exception.Message)"; return }
+    $script:WtPruefJob = [pscustomobject]@{ Job = $job; Aufgaben = @($a.Aufgaben); Probleme = $probleme; Start = Get-Date }
+    Write-WolLog "WaToKi-Prüfung gestartet: $($a.Aufgaben.Count) Verbindung(en)"
+    if (-not $script:WtPruefTimer) {
+        $script:WtPruefTimer = [System.Windows.Threading.DispatcherTimer]::new()
+        $script:WtPruefTimer.Interval = [TimeSpan]::FromSeconds(1)
+        $script:WtPruefTimer.Add_Tick({ Watch-WolWtPruefung })
+    }
+    $script:WtPruefTimer.Start()
+    $c.TxtStatus.Text = "Prüfung läuft: 0 von $($a.Aufgaben.Count) Verbindungen geprüft."
+    Update-WolWtStatus
+}
+
 # Fenster
 ## Wird vom Menü Module > WaToKi aufgerufen: Fenster neben der Tabelle (bleibt offen, die Tabelle bleibt bedienbar)
 function script:Show-WolModulWATOKI {
@@ -684,10 +1198,12 @@ function script:Show-WolModulWATOKI {
       <ListBox x:Name="Liste" Grid.Column="0"/>
       <TextBox x:Name="TxtInfo" Grid.Column="2" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="6"/>
     </Grid>
-    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+    <WrapPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
       <Button x:Name="BtnStart" Content="&#9654; Starten" Padding="16,6" Margin="0,0,8,0" FontWeight="Bold"/>
       <Button x:Name="BtnAuto" Content="Automatik starten" Padding="10,6" Margin="0,0,8,0"
-              ToolTip="Arbeitet alle Geräte mit Eintrag in der Spalte Wartungsreihenfolge nacheinander ab (je Skript ein unsichtbarer Prozess, Zeitlimit 10 Minuten) und schreibt Gesamtdatei.json und Detail.txt in einen neuen Ordner"/>
+              ToolTip="Arbeitet alle Geräte mit Eintrag in der Spalte Wartungsreihenfolge nacheinander ab (je Skript ein unsichtbarer Prozess, Zeitlimit 10 Minuten) und schreibt Autowartung-Gesamtdatei.json und Detail.txt in einen neuen Ordner"/>
+      <Button x:Name="BtnPruef" Content="Automatik prüfen" Padding="10,6" Margin="0,0,8,0"
+              ToolTip="Prüft vorab, ob die Automatik laufen würde: Name, Ping, WinRM- und SSH-Anmeldung, Module. Es wird nichts verändert."/>
       <Button x:Name="BtnStop" Content="Automatik stoppen" Padding="10,6" Margin="0,0,8,0" IsEnabled="False"
               ToolTip="Beendet das laufende Skript, startet die übrigen nicht mehr und speichert die bisherigen Ergebnisse"/>
       <Button x:Name="BtnAusgabe" Content="Ausgabeordner öffnen" Padding="10,6" Margin="0,0,8,0"/>
@@ -695,19 +1211,20 @@ function script:Show-WolModulWATOKI {
       <Button x:Name="BtnSchliessen" Content="Schließen" Padding="10,6" Margin="0,0,16,0"/>
       <CheckBox x:Name="ChkSpalten" Content="Spalte Wartungsreihenfolge in der Tabelle anzeigen" VerticalAlignment="Center"
                 ToolTip="Blendet die Spalte Wartungsreihenfolge in der Tabelle ein (Standard: aus). Beim Schließen des Fensters wird sie wieder ausgeblendet"/>
-    </StackPanel>
+    </WrapPanel>
     <TextBlock x:Name="TxtStatus" Grid.Row="3" TextWrapping="Wrap" Foreground="DimGray" Margin="0,8,0,0"/>
   </Grid>
 </Window>
 '@
     $f.Owner = $script:Fenster
     $script:WtC = @{}
-    foreach ($name in 'Liste', 'TxtInfo', 'BtnStart', 'BtnAuto', 'BtnStop', 'BtnAusgabe', 'BtnNeu', 'BtnSchliessen', 'TxtStatus') { $script:WtC[$name] = $f.FindName($name) }
+    foreach ($name in 'Liste', 'TxtInfo', 'BtnStart', 'BtnAuto', 'BtnPruef', 'BtnStop', 'BtnAusgabe', 'BtnNeu', 'BtnSchliessen', 'TxtStatus') { $script:WtC[$name] = $f.FindName($name) }
     Connect-WolModulSpaltenHaken -Fenster $f -Key 'WATOKI'
     $script:WtC.Liste.Add_SelectionChanged({ Show-WolWtBeschreibung })
     $script:WtC.Liste.Add_MouseDoubleClick({ Start-WolWtSkript })
     $script:WtC.BtnStart.Add_Click({ Start-WolWtSkript })
     $script:WtC.BtnAuto.Add_Click({ Start-WolWtAutomatik })
+    $script:WtC.BtnPruef.Add_Click({ Start-WolWtPruefung })
     $script:WtC.BtnStop.Add_Click({ Stop-WolWtAutomatik })
     $script:WtC.BtnAusgabe.Add_Click({
         try { Invoke-Item -LiteralPath (Get-WolWtAusgabeOrdner) }
