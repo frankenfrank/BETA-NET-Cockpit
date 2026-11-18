@@ -22,7 +22,7 @@ Write-Host "=== Wartung-02.2-Backup-Synology-ActiveBackupM365 ===" -ForegroundCo
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt Active Backup for Microsoft 365 auf Synology-NAS über die DSM Web API ab (SYNO.ActiveBackupOffice365). Bewertet das Backup mit OK/WARNUNG/FEHLER (Alter der letzten Ausführung, Fehler/Warnungen je Dienst, Protokoll-Auffälligkeiten), gibt Task-Details, Speicherverbrauch und das Tagesprotokoll der letzten 30 Tage in Datei/Konsole aus.
 
@@ -35,7 +35,7 @@ VORAUSSETZUNGEN
 - PowerShell 7 (winget install --id Microsoft.PowerShell -e)
 - HTTPS-Zugriff auf die DSM-Weboberfläche des NAS (Standardport 5001)
 - DSM-Benutzerkonto mit Zugriff auf Active Backup for Microsoft 365 (Konto aus dem NET-COCKPIT oder Abfrage)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

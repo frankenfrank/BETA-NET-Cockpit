@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft zentrale VMware-Komponenten (Hosts, Cluster, VMs, Datastores, Snapshots) über eine vCenter-Verbindung und schreibt eine standardisierte Wartungsdatei. Die Ausgabe ist für eine technische Auswertung vorbereitet.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Netzwerkzugriff (HTTPS) vom ausführenden Rechner zum vCenter
 - Gültige vCenter-Zugangsdaten (aus dem NET-COCKPIT, sonst interaktiv abgefragt)
 - Internetzugriff zur PowerShell Gallery, falls das Modul VMware.PowerCLI noch nicht installiert ist (wird sonst automatisch installiert)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

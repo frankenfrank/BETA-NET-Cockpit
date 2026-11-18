@@ -23,7 +23,7 @@ Write-Host "=== $($MyInvocation.MyCommand.Name) ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt QNAP-NAS per SSH Rohstatus ab (Firmware, RAID/mdstat, Speicherplatz, Datenträger/SMART) und schreibt das Ergebnis in eine Datei.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Posh-SSH-Modul (wird bei Bedarf automatisch installiert: Install-Module Posh-SSH -Scope CurrentUser -Force)
 - SSH-Dienst in der QNAP-Systemsteuerung (Netzwerk & Dateidienste > Telnet/SSH) aktiviert
 - Zugangsdaten mit Admin-Rechten auf der QNAP (für qcli-Befehle)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -23,7 +23,7 @@ Write-Host "=== Wartung-09.4-3CX-onPrem ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft 3CX-on-Premise-Server per SSH (Windows oder Debian, OS wird automatisch per uname erkannt): installiertes 3CX-Paket, Status der 3CX-Dienste, Alter des letzten Backups. Bietet bei nicht erreichbarem SSH auf Windows-Zielen einen automatischen Fix per WinRM an (OpenSSH-Server installieren + Firewall-Regel setzen). Deckt nicht ab: SIP-Trunk-Status, Endgeräte-Firmware, verfügbare 3CX-Updates (dafür 3CX Management Console/XAPI). Kein Zugriff auf die interne 3CX-Datenbank.
 
@@ -36,7 +36,7 @@ VORAUSSETZUNGEN
 - Bei Windows-Zielen: OpenSSH-Server-Feature installiert, Dienst "sshd" gestartet, Firewall-Regel "OpenSSH-Server-In-TCP" für Profil "Any" freigegeben, Login mit Windows-Admin-Benutzer (kein root)
 - Für den eingebauten Auto-Fix bei nicht erreichbarem SSH auf Windows-Zielen: WinRM auf dem Zielserver erreichbar, Zugangsdaten mit Admin-Rechten
 - Backup-Pfad Debian: Standardpfad für Instance1 (/var/lib/3cxpbx/Instance1/Data/Backups), bei abweichender Instanz in $BackupPfadLinux anpassen; Backup-Pfad Windows wird automatisch unter C:\ProgramData\3CX gesucht
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

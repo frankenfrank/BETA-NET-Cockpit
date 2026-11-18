@@ -22,7 +22,7 @@ Write-Host "=== Wartung-03.2-ServerNASProtokolle ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Liest Application-/System-Eventlogs (plus rollenspezifische Zusatzlogs wie Hyper-V, AD, DNS, DHCP, RDS, Druck, Zertifikatsdienste, Dateiserver) der letzten 30 Tage von einer Liste von Hyper-V-Hosts aus, fasst wiederkehrende Ereignisse zusammen und schreibt eine formatierte Datei für die Wartungsauswertung. Zusätzlich werden je Host Speicherplatz (lokale Partitionen), Betriebssystemversion/-BuildNumber und nicht gestartete Autostart-Dienste ausgegeben. Alle Daten je Host (Speicherplatz, OS, Dienste, Rollen) werden über eine einzige CIM-Session pro Host abgerufen. Hostliste wird bei Bedarf interaktiv angelegt/erweitert.
 
@@ -52,7 +52,7 @@ WICHTIG:
 $RolleLogMap ggf. anpassen.
 
 2. Die Hyper-V-Zusatzlogs Hypervisor-Admin, Compute-Admin, VmSwitch-Operational und StorageVSP-Admin sind NICHT verifiziert. Nicht vorhandene Logs werden nur in der Konsole vermerkt und nicht als Fehler in die Logdatei geschrieben.
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

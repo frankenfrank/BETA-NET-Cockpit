@@ -16,8 +16,10 @@
     Automatik (Knopf "Automatik starten"): arbeitet alle Geräte ab, die in der Spalte "Wartungsreihenfolge" Skriptnamen haben (Name ohne "Wartung-" und ohne .ps1, mehrere durch Komma, Semikolon oder Zeilenumbruch getrennt)
     - Je Skript ein Lauf mit allen zugehörigen Geräten (Skripte, die nur ein Gerät nehmen, laufen je Gerät), die Skripte laufen nacheinander nach Skriptname sortiert, jedes in einem eigenen unsichtbaren PowerShell-7-Prozess mit -Automatik
     - Voraussetzungen: Skript kennt -Automatik, keine Syntaxfehler, Kennwörter der Konten sind in der Sitzung vorhanden; sonst Status "übersprungen" mit Grund
-    - Status je Lauf: OK, übersprungen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0)
-    - Ergebnis im Ordner Lauf_<Datum_Uhrzeit> im Ausgabeordner: Gesamtdatei.json (maschinenlesbar für den Warterator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts)
+    - Vor dem Start fragt das Cockpit fehlende Kennwörter der Konten ab (einmal pro Benutzername)
+    - Knopf "Automatik stoppen": beendet das laufende Skript, startet die übrigen nicht mehr (Status abgebrochen) und speichert die bisherigen Ergebnisse
+    - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die letzte Konsolenzeile in der Meldung)
+    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Gesamtdatei.json (maschinenlesbar für den Warterator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts)
     - Vertrag für die Skripte: ein Skript mit -Automatik fragt nichts ab, öffnet nichts und schreibt seine Werte für die Checkliste als Ergebnis_<Skriptname ohne Wartung- und .ps1>.json in -Ausgabeordner (wird unverändert in die Gesamtdatei übernommen); alles Ausführliche gibt es auf der Konsole aus (landet in Detail.txt)
     Sonst speichert das Modul nichts.
 #>
@@ -183,6 +185,7 @@ function script:Show-WolWtBeschreibung {
 function script:Update-WolWtStatus {
     $c = $script:WtC
     if (-not $c.TxtStatus) { return }
+    if ($c.BtnStop) { $c.BtnStop.IsEnabled = [bool]$script:WtLauf }
     if ($script:WtLauf) {
         $c.BtnStart.IsEnabled = $false
         if ($c.BtnAuto) { $c.BtnAuto.IsEnabled = $false }
@@ -441,7 +444,7 @@ function script:Complete-WolWtAutomatik {
     $l = $script:WtLauf
     $script:WtAutoTimer.Stop()
     $ende = Get-Date
-    $zaehl = @{ OK = 0; 'übersprungen' = 0; Fehler = 0 }
+    $zaehl = @{ OK = 0; 'übersprungen' = 0; Fehler = 0; 'abgebrochen' = 0 }
     foreach ($e in $l.Ergebnisse) { $zaehl[$e.Status] = 1 + [int]$zaehl[$e.Status] }
     try {
         $gesamt = [pscustomobject]@{
@@ -450,7 +453,7 @@ function script:Complete-WolWtAutomatik {
             Ende         = $ende.ToString('s')
             Rechner      = $env:COMPUTERNAME
             Unbekannt    = @($l.Unbekannt)
-            Zusammenfassung = [pscustomobject]@{ OK = [int]$zaehl['OK']; Uebersprungen = [int]$zaehl['übersprungen']; Fehler = [int]$zaehl['Fehler'] }
+            Zusammenfassung = [pscustomobject]@{ OK = [int]$zaehl['OK']; Uebersprungen = [int]$zaehl['übersprungen']; Fehler = [int]$zaehl['Fehler']; Abgebrochen = [int]$zaehl['abgebrochen'] }
             Skripte      = @($l.Ergebnisse | ForEach-Object { [pscustomobject]@{ Skript = $_.Skript; Ziele = $_.Ziele; Status = $_.Status; Meldung = $_.Meldung; Start = $_.Start; Ende = $_.Ende; Sekunden = $_.Sekunden; Ergebnis = $_.Ergebnis } })
         }
         $gesamt | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath (Join-Path $l.Ordner 'Gesamtdatei.json') -Encoding utf8
@@ -458,7 +461,7 @@ function script:Complete-WolWtAutomatik {
         $text.Add('WaToKi Automatiklauf')
         $text.Add("Start : $($l.Start.ToString('dd.MM.yyyy HH:mm:ss'))")
         $text.Add("Ende  : $($ende.ToString('dd.MM.yyyy HH:mm:ss'))")
-        $text.Add("Ergebnis: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler")
+        $text.Add("Ergebnis: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' })")
         if ($l.Unbekannt.Count -gt 0) { $text.Add('Unbekannte Skriptnamen in der Wartungsreihenfolge: ' + ($l.Unbekannt -join '; ')) }
         foreach ($e in $l.Ergebnisse) {
             $text.Add('')
@@ -470,8 +473,8 @@ function script:Complete-WolWtAutomatik {
             if ($e.Konsole) { $text.Add($e.Konsole.TrimEnd()) }
         }
         ($text -join "`r`n") | Set-Content -LiteralPath (Join-Path $l.Ordner 'Detail.txt') -Encoding utf8BOM
-        Write-WolLog "WaToKi-Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler ($($l.Ordner))"
-        $meldung = "Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler. Ordner: $($l.Ordner)"
+        Write-WolLog "WaToKi-Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }) ($($l.Ordner))"
+        $meldung = "Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }). Ordner: $($l.Ordner)"
     }
     catch { $meldung = "Automatik beendet, aber die Ergebnisdateien konnten nicht geschrieben werden: $($_.Exception.Message)"; Write-WolLog "WaToKi-Automatik: $meldung" }
     $script:WtLauf = $null
@@ -499,7 +502,7 @@ function script:Start-WolWtAutoNaechstes {
         $kodiert = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($aufruf.Befehl))
         try {
             $pwsh = (Get-Process -Id $PID).Path
-            $script:WtProzess = Start-Process -FilePath $pwsh -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $kodiert -WindowStyle Hidden -PassThru -RedirectStandardOutput $l.AktuellKonsole -RedirectStandardError $l.AktuellFehler -ErrorAction Stop
+            $script:WtProzess = Start-Process -FilePath $pwsh -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', $kodiert -WindowStyle Hidden -PassThru -RedirectStandardOutput $l.AktuellKonsole -RedirectStandardError $l.AktuellFehler -ErrorAction Stop
         }
         catch {
             $script:WtProzess = $null
@@ -521,6 +524,35 @@ function script:Start-WolWtAutoNaechstes {
     Complete-WolWtAutomatik
 }
 
+## Laufendes Skript abschließen: Konsole einsammeln, Status bestimmen, Ergebnis eintragen (Abbruch = vom Knopf "Automatik stoppen" beendet)
+function script:Complete-WolWtAktuell {
+    param([bool]$Zeitlimit = $false, [bool]$Abbruch = $false)
+    $l = $script:WtLauf
+    $code = ''
+    try { $code = [string]$script:WtProzess.ExitCode } catch { }
+    $ende = Get-Date
+    Remove-WolWtAnmeldeDatei
+    $konsole = ''
+    foreach ($d in $l.AktuellKonsole, $l.AktuellFehler) {
+        if (Test-Path -LiteralPath $d) {
+            $inhalt = Get-Content -LiteralPath $d -Raw -Encoding utf8
+            if ($inhalt) { $konsole += $inhalt.TrimEnd() + "`r`n" }
+            try { Remove-Item -LiteralPath $d -Force -ErrorAction Stop } catch { }
+        }
+    }
+    if ($Abbruch) { $status = 'abgebrochen'; $meldung = 'Der Lauf wurde gestoppt, das Skript wurde beendet.' }
+    elseif ($Zeitlimit) { $status = 'Fehler'; $meldung = "Zeitlimit von $($script:WtLimitMinuten) Minuten überschritten, das Skript wurde beendet." }
+    elseif ($code -eq '0') { $status = 'OK'; $meldung = '' }
+    else {
+        $status = 'Fehler'; $meldung = "Exitcode $code"
+        $letzte = @(($konsole -split '\r?\n') | Where-Object { $_.Trim() } | Select-Object -Last 1)
+        if ($letzte.Count -gt 0) { $z = $letzte[0].Trim(); if ($z.Length -gt 140) { $z = $z.Substring(0, 140) + '...' }; $meldung += ": $z" }
+    }
+    Add-WolWtErgebnis -Item $l.AktuellItem -Status $status -Meldung $meldung -Start $script:WtStart -Ende $ende -Konsole $konsole -Ergebnisdatei $l.AktuellErgebnis
+    $script:WtProzess = $null
+    $l.Index++
+}
+
 ## Timer: laufendes Skript prüfen (Ende, Zeitlimit) und das nächste starten
 function script:Watch-WolWtAutomatik {
     $l = $script:WtLauf
@@ -534,26 +566,33 @@ function script:Watch-WolWtAutomatik {
             $zeitlimit = $true
             try { $script:WtProzess.Kill($true); [void]$script:WtProzess.WaitForExit(5000) } catch { }
         }
-        $code = ''
-        try { $code = [string]$script:WtProzess.ExitCode } catch { }
-        $ende = Get-Date
-        Remove-WolWtAnmeldeDatei
-        $konsole = ''
-        foreach ($d in $l.AktuellKonsole, $l.AktuellFehler) {
-            if (Test-Path -LiteralPath $d) {
-                $inhalt = Get-Content -LiteralPath $d -Raw -Encoding utf8
-                if ($inhalt) { $konsole += $inhalt.TrimEnd() + "`r`n" }
-                try { Remove-Item -LiteralPath $d -Force -ErrorAction Stop } catch { }
-            }
-        }
-        if ($zeitlimit) { $status = 'Fehler'; $meldung = "Zeitlimit von $($script:WtLimitMinuten) Minuten überschritten, das Skript wurde beendet." }
-        elseif ($code -eq '0') { $status = 'OK'; $meldung = '' }
-        else { $status = 'Fehler'; $meldung = "Exitcode $code" }
-        Add-WolWtErgebnis -Item $l.AktuellItem -Status $status -Meldung $meldung -Start $script:WtStart -Ende $ende -Konsole $konsole -Ergebnisdatei $l.AktuellErgebnis
-        $script:WtProzess = $null
-        $l.Index++
+        Complete-WolWtAktuell -Zeitlimit $zeitlimit
     }
     Start-WolWtAutoNaechstes
+}
+
+## Automatik stoppen (Knopf "Automatik stoppen"): laufendes Skript beenden, übrige Skripte nicht mehr starten, bisherige Ergebnisse speichern
+function script:Stop-WolWtAutomatik {
+    if (-not $script:WtLauf) { return }
+    $antwort = [System.Windows.MessageBox]::Show("Automatiklauf stoppen?`r`n`r`nDas laufende Skript wird beendet, die übrigen werden nicht mehr gestartet. Die bisherigen Ergebnisse werden gespeichert.", 'NET-COCKPIT', 'YesNo', 'Question')
+    $l = $script:WtLauf
+    if ($antwort -ne 'Yes' -or -not $l) { return }
+    $script:WtAutoTimer.Stop()
+    if ($script:WtProzess) {
+        $beendet = $false
+        try { $beendet = $script:WtProzess.HasExited } catch { $beendet = $true }
+        if (-not $beendet) {
+            try { $script:WtProzess.Kill($true); [void]$script:WtProzess.WaitForExit(5000) } catch { }
+            Complete-WolWtAktuell -Abbruch $true
+        }
+        else { Complete-WolWtAktuell }
+    }
+    while ($l.Index -lt $l.Plan.Count) {
+        Add-WolWtErgebnis -Item $l.Plan[$l.Index] -Status 'abgebrochen' -Meldung 'Der Lauf wurde gestoppt, das Skript wurde nicht gestartet.' -Start $null -Ende $null -Konsole '' -Ergebnisdatei ''
+        $l.Index++
+    }
+    Write-WolLog 'WaToKi-Automatik: vom Benutzer gestoppt'
+    Complete-WolWtAutomatik
 }
 
 ## Automatiklauf starten (Knopf "Automatik starten")
@@ -572,8 +611,18 @@ function script:Start-WolWtAutomatik {
     if ($p.Unbekannt.Count -gt 0) { $text += "`r`n`r`nUnbekannte Skriptnamen (werden ignoriert): " + ($p.Unbekannt -join '; ') }
     $antwort = [System.Windows.MessageBox]::Show($text, 'NET-COCKPIT', 'YesNo', 'Question')
     if ($antwort -ne 'Yes') { return }
+    ### Fehlende Kennwörter der Konten jetzt abfragen (einmal pro Benutzername), statt Skripte zu überspringen
+    $kontoMenge = [System.Collections.Generic.HashSet[object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+    foreach ($item in @($bereit | Where-Object { $_.Skript.HatZiel -and ($_.Skript.HatAnmeldung -or $_.Skript.HatAnmeldungJeZiel) })) {
+        foreach ($z in $item.Zeilen) { [void]$kontoMenge.Add($z) }
+    }
+    $kontoZeilen = @($kontoMenge)
+    if ($kontoZeilen.Count -gt 0 -and -not (Resolve-WolKonten -Zeilen $kontoZeilen -Besitzer $script:WtFenster)) {
+        $c.TxtStatus.Text = 'Automatik nicht gestartet: Die Kennwortabfrage wurde abgebrochen.'
+        return
+    }
     try {
-        $ordner = Join-Path (Get-WolWtAusgabeOrdner) ('Lauf_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        $ordner = Join-Path (Get-WolWtAusgabeOrdner) ('Autowartung_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
         [void](New-Item -Path $ordner -ItemType Directory -Force -ErrorAction Stop)
     }
     catch { $c.TxtStatus.Text = "Der Ordner für den Lauf konnte nicht angelegt werden: $($_.Exception.Message)"; return }
@@ -625,6 +674,8 @@ function script:Show-WolModulWATOKI {
       <Button x:Name="BtnStart" Content="&#9654; Starten" Padding="16,6" Margin="0,0,8,0" FontWeight="Bold"/>
       <Button x:Name="BtnAuto" Content="Automatik starten" Padding="10,6" Margin="0,0,8,0"
               ToolTip="Arbeitet alle Geräte mit Eintrag in der Spalte Wartungsreihenfolge nacheinander ab (je Skript ein unsichtbarer Prozess, Zeitlimit 10 Minuten) und schreibt Gesamtdatei.json und Detail.txt in einen neuen Ordner"/>
+      <Button x:Name="BtnStop" Content="Automatik stoppen" Padding="10,6" Margin="0,0,8,0" IsEnabled="False"
+              ToolTip="Beendet das laufende Skript, startet die übrigen nicht mehr und speichert die bisherigen Ergebnisse"/>
       <Button x:Name="BtnAusgabe" Content="Ausgabeordner öffnen" Padding="10,6" Margin="0,0,8,0"/>
       <Button x:Name="BtnNeu" Content="Liste aktualisieren" Padding="10,6" Margin="0,0,8,0"/>
       <Button x:Name="BtnSchliessen" Content="Schließen" Padding="10,6" Margin="0,0,16,0"/>
@@ -637,12 +688,13 @@ function script:Show-WolModulWATOKI {
 '@
     $f.Owner = $script:Fenster
     $script:WtC = @{}
-    foreach ($name in 'Liste', 'TxtInfo', 'BtnStart', 'BtnAuto', 'BtnAusgabe', 'BtnNeu', 'BtnSchliessen', 'TxtStatus') { $script:WtC[$name] = $f.FindName($name) }
+    foreach ($name in 'Liste', 'TxtInfo', 'BtnStart', 'BtnAuto', 'BtnStop', 'BtnAusgabe', 'BtnNeu', 'BtnSchliessen', 'TxtStatus') { $script:WtC[$name] = $f.FindName($name) }
     Connect-WolModulSpaltenHaken -Fenster $f -Key 'WATOKI'
     $script:WtC.Liste.Add_SelectionChanged({ Show-WolWtBeschreibung })
     $script:WtC.Liste.Add_MouseDoubleClick({ Start-WolWtSkript })
     $script:WtC.BtnStart.Add_Click({ Start-WolWtSkript })
     $script:WtC.BtnAuto.Add_Click({ Start-WolWtAutomatik })
+    $script:WtC.BtnStop.Add_Click({ Stop-WolWtAutomatik })
     $script:WtC.BtnAusgabe.Add_Click({
         try { Invoke-Item -LiteralPath (Get-WolWtAusgabeOrdner) }
         catch { $script:WtC.TxtStatus.Text = "Der Ausgabeordner konnte nicht geöffnet werden: $($_.Exception.Message)" }

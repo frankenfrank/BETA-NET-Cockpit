@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Führt eine Kurzprüfung auf einem Exchange-Server aus (per Remote-PowerShell): Speicherplatz der Datenbanken, DAG-Konsistenz, alte/inaktive Postfächer, Zertifikate, installierte CU-Version.
 
@@ -33,7 +33,7 @@ VORAUSSETZUNGEN
 - PowerShell 7 auf dem ausführenden Rechner (das Exchange-Snapin läuft nur in Windows PowerShell, daher Verbindung per Remote-PowerShell auf http://<Server>/PowerShell/)
 - Zielserver per vollständigem Namen (FQDN) ansprechbar, da die Anmeldung per Kerberos erfolgt
 - Exchange-Admin-Rechte (View-Only Organization Management reicht für die Abfragen)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

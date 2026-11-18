@@ -22,7 +22,7 @@ Write-Host "=== Wartung-08.5-USV ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt USV-Status per SNMP (Standard UPS-MIB, RFC 1628) ab – Batteriestatus, Restlaufzeit, Ladezustand, Ausgangsquelle, Last, Alarme – und gibt das Ergebnis in Datei/Konsole aus.
 
@@ -33,7 +33,7 @@ VORAUSSETZUNGEN
 - SNMP-Modul (wird bei Bedarf vom Skript installiert): Install-PSResource -Name SNMP -Scope CurrentUser -TrustRepository
 - SNMP muss im Netzwerk-/Management-Modul der USV aktiviert sein (z. B. AdPoS Netman, FSP SNMP-Karte, CyberPower RMCARD)
 - Geräte ohne Ethernet-Modul können so nicht abgefragt werden
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

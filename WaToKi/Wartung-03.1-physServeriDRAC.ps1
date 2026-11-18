@@ -23,7 +23,7 @@ Write-Host "=== Wartung-03.1-physServeriDRAC ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt iDRAC-Hosts per Redfish-API ab (BIOS/Firmware, RAID/Laufwerke, Netzteile, Temperaturen) und schreibt Zusammenfassung + Details in eine gemeinsame Logdatei.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Netzwerkzugriff (HTTPS) vom ausführenden Rechner zu jedem iDRAC
 - Gültige iDRAC-Zugangsdaten für jeden Host (Konto aus dem NET-COCKPIT oder Abfrage pro Host)
 - Redfish aktiviert. iDRAC Settings > Services > Redfish > Enabled
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

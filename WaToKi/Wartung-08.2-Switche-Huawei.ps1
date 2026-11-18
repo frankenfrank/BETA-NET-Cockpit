@@ -22,7 +22,7 @@ Write-Host "=== Wartung-08.2-Switche-Huawei ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft per SSH Huawei-Switche (S5720, VRP) auf Konfigsicherung, Firmware-Version und VLAN-/Port-Konfiguration und erstellt zusätzlich eine Ist-Aufnahme (Interface-Status, Logauszug, Lüfter, Netzteil, Temperatur, PoE).
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - SSH (STelnet) aktiviert auf dem Switch, erreichbar auf Port 22
 - Benutzer mit Service-Type SSH und Privilege-Level 3 oder höher (kein enable-Modus bei VRP)
 - CLI-Befehle für VRP V200R0xx (S5720) - bei abweichender Version Syntax vor Produktivbetrieb prüfen
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

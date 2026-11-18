@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt eine STARFACE Cloud Telefonanlage (STARFACE 10) per REST-API ab und schreibt die Wartungsdaten als Textdatei nach <Ausgabeordner>\Wartung_STARFACE_<Anlagenname>.txt (Version, Update-Einstellungen, Lizenzen, Auslastung, Mailserver, Gruppen, Voicemailboxen, Benutzer mit Rufnummern, Gerät und DND). Die Datei wird bei jedem Lauf überschrieben.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Anlagen-URL der STARFACE Cloud (Eingabe mit oder ohne https:// möglich)
 - Administrator-Benutzer der Anlage mit der Berechtigung "API Zugriff mit OAuth Password Grant"
 - Client-Secret von rest-client-headless (Admin-Oberfläche unter Server -> Status, Bereich REST API)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft NoSpamProxy Email-Relay-Status, E-Mail-Quarantäne, Zertifikatsablauf und NSP-Eventlogs (letzte 30 Tage) und schreibt Report + Zusammenfassung.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Remote: WinRM mit PowerShell-7-Endpunkt (PowerShell.7) auf dem NoSpamProxy-Server
 - NoSpamProxy-PowerShell-Modul auf dem NoSpamProxy-Server (wird mit NSP mitinstalliert)
 - Ausführendes Konto Mitglied von "NoSpamProxy Monitoring Administrators" (bzw. "...Configuration Administrators")
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

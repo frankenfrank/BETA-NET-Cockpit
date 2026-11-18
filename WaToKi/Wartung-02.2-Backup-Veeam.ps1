@@ -22,7 +22,7 @@ Write-Host "=== Wartung-02.2-BackupVeeam ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Exportiert die Veeam-Backup-Sitzungen der letzten 30 Tage als Textdatei (Veeam B&R v12+, PowerShell-Modul statt Snapin). Das Skript kann auf dem Veeam-Server selbst oder auf einem beliebigen anderen Server gestartet werden. Die Veeam-Abfrage läuft immer auf dem Veeam-Server (lokal bzw. als lokale geplante Aufgabe, die per Invoke-Command angelegt wird), die Textdatei wird auf dem Rechner gespeichert, auf dem das Skript gestartet wurde.
 
@@ -33,7 +33,7 @@ VORAUSSETZUNGEN
 - PowerShell 7 auf dem ausführenden Rechner. Die Abfrage läuft auf dem Veeam-Server zuerst in PowerShell 7 (Veeam 13) und sonst in Windows PowerShell 5.1 (Veeam 12). Bei einem anderen Server startet das Skript dafür kurzzeitig eine geplante Aufgabe auf dem Veeam-Server (pwsh.exe lokal), weil das Veeam-13-Modul in einer WinRM-Sitzung nicht lädt. Die Aufgabe und ihre Dateien in C:\Windows\Temp werden danach wieder gelöscht
 - Bei Start von einem anderen Server: WinRM zum Veeam-Server erreichbar und Anmeldung mit einem Konto, das dort Administrator und in Veeam berechtigt ist; die Aufgabe läuft unter diesem Konto (ohne übergebenes Konto unter dem angemeldeten Konto)
 - PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) auf dem Veeam-Server, sonst läuft nur der Weg über Windows PowerShell 5.1
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -22,7 +22,7 @@ Write-Host "=== Wartung-07.1-Firewall-Sophos ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft eine oder mehrere Sophos Firewalls per XML-API (Firmware-Hinweis, Backup-Hinweis, Log-Hinweis, offene Ports/DNAT von WAN) und schreibt Ergebnis in eine Logdatei.
 
@@ -32,7 +32,7 @@ VORAUSSETZUNGEN
 - API-Zugriff auf der Sophos Firewall aktiviert (System > Verwaltung > API-Zugriff), inkl. Eintrag der Quell-IP (dieser Rechner) unter den zugelassenen IP-Adressen
 - PowerShell 7 auf dem ausführenden Rechner
 - Zugangsdaten für ein Konto mit API-Zugriff (aus dem NET-COCKPIT je Firewall, sonst Abfrage)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

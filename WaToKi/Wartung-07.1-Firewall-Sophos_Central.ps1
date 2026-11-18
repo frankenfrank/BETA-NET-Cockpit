@@ -22,7 +22,7 @@ Write-Host "=== Wartung-07.1-Firewall-Sophos_Central ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft Sophos Central per API (Endpoint-Health, Tamper Protection, letzter Kontakt, offene Alerts, Firewalls inkl. Firmware/Verbindung, Lizenzen) und schreibt das Ergebnis in eine Logdatei. Bei Partner-/Organisations-Zugang werden alle Mandanten nacheinander geprüft.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Die Zugangsdaten (ClientID und Geheimer Clientschlüssel) sind in der KuDo des Kunden hinterlegt
 - PowerShell 7 auf dem ausführenden Rechner
 - Internetzugriff auf id.sophos.com und api.central.sophos.com (HTTPS)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

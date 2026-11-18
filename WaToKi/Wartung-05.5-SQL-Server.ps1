@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 SQL-Kurzcheck für eine oder mehrere SQL-Server-Instanzen: prüft Datenbanksicherungen (Voll/Diff/Log aus msdb), Wartungspläne, SQL-Fehlerprotokolle, Speicherplatz des Backup-Laufwerks und SSMS-Version, erstellt einen Protokollvorschlag für Wartungsnotizen. Instanzsuche per Registry (lokal) und SQL-Server-Browser-Dienst (Netzwerk), interaktive Auswahl und Login (bis zu 3 Versuche, SQL-Login oder Windows-Authentifizierung).
 
@@ -38,7 +38,7 @@ VORAUSSETZUNGEN
 - Für das Lesen der Backup-Historie ggf. Rechte vergeben:
   USE msdb;
   EXEC sp_addrolemember 'db_datareader', 'DOMÄNE\administrator';
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

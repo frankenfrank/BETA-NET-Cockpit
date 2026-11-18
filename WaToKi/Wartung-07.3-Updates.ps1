@@ -21,7 +21,7 @@ Write-Host "=== Wartung-07.3-Updates ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt von einer Liste virtueller Server per CIM die aktuelle Windows-Version/Build und die letzten 5 installierten Updates ab und schreibt eine formatierte Datei für die Wartungsauswertung.
 
@@ -33,7 +33,7 @@ VORAUSSETZUNGEN
   New-NetFirewallRule -DisplayName "Allow Remote EventLog RPC Dynamic" -Direction Inbound -Protocol TCP -LocalPort 49152-65535 -Action Allow
 - Ausführendes Konto benötigt Admin-Rechte auf allen Zielservern (CIM/WMI)
 - Alternativ ohne Firewall-Öffnung: Skript direkt auf dem jeweiligen Server selbst ausführen: irm script.frankenserver.net/Wartung-07.3-Updates.ps1 | iex
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -23,7 +23,7 @@ Write-Host "=== Wartung-08.4-NAS-Synology ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt Systemdaten (Firmware/DSM-Version, Storage/RAID, Datenträger, Speicherplatz, CPU/RAM-Auslastung) von Synology-NAS über die DSM Web API ab und gibt das Ergebnis in Datei/Konsole aus.
 
@@ -36,7 +36,7 @@ VORAUSSETZUNGEN
 - PowerShell 7 auf dem ausführenden Rechner
 - HTTPS-Zugriff auf die DSM-Weboberfläche des NAS (Standardport 5001)
 - DSM-Benutzerkonto mit Zugriff auf Storage Manager / Control Panel
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

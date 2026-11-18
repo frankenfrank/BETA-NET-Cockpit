@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft zentrale Hyper-V-Komponenten (Replikation, Clusterstatus, VMs, Speicherplatz, Integrationsdienste, Snapshots) remote auf einer Liste von Hyper-V-Hosts per Invoke-Command und schreibt eine standardisierte Wartungsdatei. Hostliste wird bei Bedarf interaktiv angelegt/erweitert.
 
@@ -35,7 +35,7 @@ VORAUSSETZUNGEN
 - Ausführendes Konto benötigt Admin-Rechte auf allen Zielhosts
 - Hyper-V-PowerShell-Modul auf allen Zielhosts installiert
 - FailoverClusters-PowerShell-Modul auf den Zielhosts installiert, falls Teil eines Clusters
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -22,7 +22,7 @@ Write-Host "=== Wartung-07.1-Firewall-Fortigate ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft per SSH auf einer FortiGate: Firmware-Aktualität, IPS-Log auf erfolgreiche Angriffe (letzte 30 Tage) und offene Ports von extern (DNAT/VIP), und schreibt Report + Zusammenfassung.
 
@@ -33,7 +33,7 @@ VORAUSSETZUNGEN
 - Posh-SSH-Modul (wird bei Bedarf automatisch installiert: Install-Module -Name Posh-SSH -Scope CurrentUser -Force)
 - SSH-Zugriff (Port 22) vom ausführenden Rechner zur FortiGate
 - Admin-Zugangsdaten für die FortiGate
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

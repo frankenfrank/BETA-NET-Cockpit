@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft einen oder alle Domain Controller: DCDIAG, inaktive Benutzer-/Computerkonten (>90 Tage), GPOs mit Softwarepaketen, gestoppte automatische Dienste, DHCP-Statistik, DNS-Root-Hints-Abgleich gegen offizielle Liste. Interaktive Auswahl von DC und optional OU, Ergebnis wird in Datei geschrieben.
 Alle Abfragen laufen auf dem jeweiligen Domaincontroller selbst (per Invoke-Command: DCDIAG, Konten, Gruppenrichtlinien, Dienste, DHCP, DNS-Root-Hints). Der ausführende Rechner braucht dafür keine RSAT-Tools. Bevorzugt wird der Endpunkt PowerShell.7 auf dem DC, fehlt er, nimmt das Skript Windows PowerShell 5.1.
@@ -35,7 +35,7 @@ VORAUSSETZUNGEN
 - Auf den Ziel-DCs: WinRM aktiviert (Enable-PSRemoting -Force) und Domain-Admin-Rechte; die Tools für Active Directory, Gruppenrichtlinien, DNS und DHCP sind dort mit den Rollen vorhanden
 - Nur beim manuellen Start ohne NET-COCKPIT (DC-Suche und OU-Auswahl): RSAT "Active Directory-Verwaltungstools" auf dem ausführenden Rechner
 - Internetzugriff auf dem ausführenden Rechner für den DNS-Root-Hints-Abgleich (https://www.internic.net/domain/named.root)
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

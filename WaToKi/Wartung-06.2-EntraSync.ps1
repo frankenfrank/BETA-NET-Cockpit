@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft den Entra Connect/ADSync-Synchronisierungsstatus (letzter Lauf, Version, Konfigurationssicherung) und das Alter des Seamless-SSO-Kerberos-Schlüssels (Konto AZUREADSSOACC). Läuft direkt auf dem Entra-Connect-Server oder von einem anderen Rechner aus per PowerShell Remoting. Es wird nur geprüft, kein Rollover durchgeführt. Konsole, Log-Datei und Konfigurationssicherung liegen immer auf dem Rechner, auf dem das Script gestartet wird.
 
@@ -37,7 +37,7 @@ VORAUSSETZUNGEN
 - ADSync-PowerShell-Modul auf dem Entra-Connect-Server vorhanden
 - Lesezugriff auf das Active Directory vom ausführenden Server aus (Prüfung des Kontos AZUREADSSOACC)
 - Schreibrechte auf C:\Temp des ausführenden Servers
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

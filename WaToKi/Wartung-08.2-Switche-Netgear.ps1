@@ -22,7 +22,7 @@ Write-Host "=== Wartung-08.2-Switche-Netgear ===" -ForegroundColor Cyan
 Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Prüft per SSH Netgear-Switche (Konfigsicherung, Firmware-Version, VLAN-/Port-Konfiguration) und erstellt zusätzlich eine Ist-Aufnahme (Interface-Status, Logauszug, Environment, PoE).
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - SSH aktiviert auf dem Switch, erreichbar auf Port 22
 - Zugangsdaten mit Rechten für den "enable"-Modus; Skript geht davon aus, dass kein separates Enable-Passwort konfiguriert ist (nutzt sonst das SSH-Passwort erneut)
 - CLI-Befehle sind Standard-FastPath (Netgear M/S-Serie) – Syntax je nach Modell/Firmware ggf. abweichend, vor Produktivbetrieb prüfen
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

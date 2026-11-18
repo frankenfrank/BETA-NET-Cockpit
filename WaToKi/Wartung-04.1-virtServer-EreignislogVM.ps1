@@ -23,7 +23,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Liest Application-/System-Eventlogs (plus rollenspezifische Zusatzlogs wie AD, DNS, DHCP, RDS, Hyper-V, Druck, Zertifikatsdienste, Dateiserver) der letzten 30 Tage von einer Liste virtueller Server aus, fasst wiederkehrende Ereignisse zusammen und schreibt eine formatierte Datei für die Wartungsauswertung. Zusätzlich werden je Server Speicherplatz (lokale Partitionen), Betriebssystemversion/-BuildNumber und nicht gestartete Autostart-Dienste ausgegeben. Am Ende erscheint zusätzlich nur in der Konsole (nicht im Log) eine Rollen-Übersicht für das Wartungsformular. Alle Daten je Server (Speicherplatz, OS, Dienste, Rollen) werden über eine einzige CIM-Session pro Server abgerufen. Serverliste wird bei Bedarf interaktiv angelegt/erweitert.
 
@@ -46,7 +46,7 @@ $RolleLogMap ggf. anpassen.
 
 2. SQL Server: hat kein eigenes Eventlog-Log, Meldungen landen im Application-Log
 (Quelle MSSQLSERVER bzw. MSSQL$<Instanz>) - deshalb hier nicht als Zusatzlog gelistet.
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

@@ -24,7 +24,7 @@ Write-Host ""
 
 # - VORAUSSETZUNGEN ANZEIGEN
 Write-Host ""
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt Health-Status, Sensorwerte und System Event Log (SEL, letzte 30 Tage) des BMC eines physischen Servers per ipmiutil ab und schreibt einen Bericht in eine Logdatei. Die Abfrage läuft immer auf dem physischen Server selbst (In-Band-Schnittstelle, nicht remote zum BMC), die Logdatei wird auf dem Rechner gespeichert, auf dem das Skript gestartet wurde.
 
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - PowerShell 7 auf dem ausführenden Rechner, bei Abfrage per Cockpit auch auf dem Server (Remoting-Endpunkt PowerShell.7 per Enable-PSRemoting in pwsh)
 - ipmiutil installiert: Download von https://ipmiutil.sourceforge.net/FILES/ (Datei ipmiutil-3.2.1-win64.zip), entpackt nach C:\tools\ipmitool\ (auf jedem abgefragten Server)
 - Bei Abfrage per Cockpit: WinRM zum Server erreichbar und Anmeldung mit einem Konto, das dort Administrator ist
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""

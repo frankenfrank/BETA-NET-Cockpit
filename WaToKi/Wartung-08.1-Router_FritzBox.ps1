@@ -22,7 +22,7 @@ Write-Host "=== Wartung-08.1-Router_FritzBox ===" -ForegroundColor Cyan
 
 Write-Host ""
 # - VORAUSSETZUNGEN ANZEIGEN
-Write-Host @'
+if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt eine oder mehrere Fritz!Box im lokalen Netz ab (TR-064, UPnP-IGD + Weboberfläche) und schreibt das Ergebnis in eine Datei.
 Ruft ab: FRITZ!OS-Version, Update-Verfügbarkeit, letzter Reconnect, externe IP, WAN-Datenrate aus den Verbindungsdetails (Online-Monitor, Seite netMoni) und Log-Einträge mit Warn-/Fehlerbezug (Schlüsselwort-Filter).
@@ -34,7 +34,7 @@ VORAUSSETZUNGEN
 - Fritz!Box: Heimnetz > Netzwerk > Netzwerkeinstellungen > "Zugriff für Anwendungen zulassen" und "Statusinformationen über UPnP übertragen" aktiviert
 - Fritz!Box-Benutzer mit der Berechtigung "FRITZ!Box Einstellungen"
 - Ausführung auf einem Rechner im selben Netz wie die Fritz!Box
-'@ -ForegroundColor Yellow
+'@ -ForegroundColor Yellow }
 Write-Host ""
 Write-Host "Ausgeführt auf: $env:COMPUTERNAME" -ForegroundColor Cyan
 Write-Host ""
