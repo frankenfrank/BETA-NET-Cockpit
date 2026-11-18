@@ -19,7 +19,7 @@
     - Vor dem Start fragt das Cockpit fehlende Kennwörter der Konten ab (einmal pro Benutzername)
     - Knopf "Automatik stoppen": beendet das laufende Skript, startet die übrigen nicht mehr (Status abgebrochen) und speichert die bisherigen Ergebnisse
     - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die Notiz aus der Ergebnisdatei in der Meldung, sonst die letzte Konsolenzeile)
-    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Autowartung-Gesamtdatei.json (maschinenlesbar für den Wartinator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts) und Techniker-Uebersicht.html (wie die Wartungscheckliste gegliedert, Fehler und Auffälligkeiten oben, als PDF druckbar) und Lieferschein.txt (Entwurf: nur die Auffälligkeiten aus den Skripten je Gerät, ohne Bewertung, im Format des Wartungs-Prompts)
+    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Autowartung-Gesamtdatei.json (maschinenlesbar für den Wartinator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts) und Techniker-Uebersicht.html (wie die Wartungscheckliste gegliedert, Fehler und Auffälligkeiten oben, als PDF druckbar) und Lieferschein.txt (knapper Entwurf nach Themen der Wartungscheckliste: nur Auffälligkeiten aus den Skripten, ohne Bewertung)
     - Knopf Automatik prüfen: testet vorab je Gerät Name, Ping, WinRM-/SSH-Anmeldung und nötige Module (nur lesend) und zeigt einen Bericht (wird auch als Automatik-Pruefung_<Datum>.txt gespeichert)
     - Vertrag für die Skripte: ein Skript mit -Automatik fragt nichts ab, öffnet nichts und schreibt seine Werte für die Checkliste als Ergebnis_<Skriptname ohne Wartung- und .ps1>.json in -Ausgabeordner (wird unverändert in die Gesamtdatei übernommen); alles Ausführliche gibt es auf der Konsole aus (landet in Detail.txt)
     Sonst speichert das Modul nichts.
@@ -606,59 +606,113 @@ function script:New-WolWtTechnikerHtml {
     $h.ToString() | Set-Content -LiteralPath $Pfad -Encoding utf8BOM
 }
 
-## Lieferschein-Entwurf: nur die Auffälligkeiten aus den Skriptergebnissen, ohne Bewertung, im Format des Wartungs-Prompts
+## Lieferschein-Entwurf: knapp, nach Themen der Wartungscheckliste gegliedert, nur Auffälligkeiten aus den Skriptergebnissen, ohne Bewertung
 function script:New-WolWtLieferschein {
     param($Gesamt, [string]$Pfad)
     $eig = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.PSObject.Properties[$n].Value } else { $null } }
     $kurzZiel = { param($z) $s = ([string]$z).Trim(); if ($s -match '^\d+(\.\d+){3}$') { $s } else { ($s -split '\.')[0] } }
-    $kuerzen = { param($t, $max) $s = (([string]$t) -replace '\s+', ' ').Trim(); if ($s.Length -gt $max) { $s.Substring(0, $max).TrimEnd() + '...' } else { $s } }
     $dezimal = { param($x) ([double]$x).ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture).Replace('.', ',') }
-    $geraete = [ordered]@{}
+    $themaVon = { param($n)
+        switch -Regex ($n) {
+            '^02\.' { 'Backup'; break }
+            '^03\.1' { 'Hardware'; break }
+            '^(03\.2|04\.)' { 'Server'; break }
+            '^05\.1' { 'Virtualisierung'; break }
+            '^05\.2' { 'Exchange'; break }
+            '^05\.3' { 'Active Directory'; break }
+            '^05\.4' { 'Mailstore'; break }
+            '^05\.5' { 'SQL'; break }
+            '^06\.2' { 'Microsoft 365'; break }
+            '^06\.5' { 'Mailsecurity'; break }
+            '^07\.1' { 'Firewall'; break }
+            '^07\.3' { 'Updates'; break }
+            '^08\.1' { 'Router'; break }
+            '^08\.2' { 'Switche'; break }
+            '^08\.4' { 'NAS'; break }
+            '^08\.5' { 'USV'; break }
+            '^09\.4' { 'TK-Anlage'; break }
+            default { $n }
+        }
+    }
+    # Texte für nicht bestandene Prüfungen, wenn das Skript keine Notiz dazu liefert
+    $keyText = @{
+        DcdiagOk = 'dcdiag nicht fehlerfrei'; RootHintsOk = 'Root-Hints weichen ab'; SeamlessKeyOk = 'Seamless-SSO-Key nicht aktuell'
+        SyncOk = 'Entra-Synchronisierung nicht fehlerfrei'; KonfigSicherung = 'Konfigurationssicherung fehlt'; WindowsUpdates = 'Updates nicht aktuell'
+        BackupErfolgreich = 'Sicherung nicht erfolgreich'; RelayOk = 'E-Mail-Relay nicht in Ordnung'; KeineSnapshots = 'veraltete Snapshots vorhanden'
+        ReplikationOk = 'Replikation nicht in Ordnung'; ClusterOk = 'Cluster nicht in Ordnung'; HostsVerbunden = 'Hosts nicht verbunden'
+        VmsLaufen = 'VMs laufen nicht alle'; SpeicherplatzOk = 'Speicherplatz knapp'; IntegrationsdiensteOk = 'Integrationsdienste nicht aktuell'
+        VmwareToolsOk = 'VMware Tools nicht aktuell'; DagOk = 'DAG-Konsistenzprüfung fehlgeschlagen'; ZertifikateGueltig = 'Zertifikat läuft ab oder ist abgelaufen'
+        SqlSicherungenAktuell = 'SQL-Sicherungen nicht aktuell'; FirmwareAktuell = 'Firmware nicht aktuell'; LogGeprueft = 'Log nicht geprüft'
+        InternetOnline = 'Internetverbindung nicht online'; BatterieOk = 'Batterie nicht in Ordnung'; UsvErreichbar = 'USV nicht erreichbar'
+    }
+    $themen = [ordered]@{}
+    $dienste = [ordered]@{}
+    $platz = [System.Collections.Generic.List[string]]::new()
     foreach ($s in @($Gesamt.Skripte)) {
         $skriptName = [string](& $eig $s 'Skript')
+        $thema = & $themaVon $skriptName
         $erg = & $eig $s 'Ergebnis'
         foreach ($e in @(& $eig $erg 'Ergebnisse')) {
             if (-not $e) { continue }
             $name = & $kurzZiel $e.Ziel
-            if (-not $geraete.Contains($name)) { $geraete[$name] = [System.Collections.Generic.List[string]]::new() }
-            $z = $geraete[$name]
+            if (-not $themen.Contains($thema)) { $themen[$thema] = [ordered]@{} }
+            if (-not $themen[$thema].Contains($name)) { $themen[$thema][$name] = [System.Collections.Generic.List[string]]::new() }
+            $z = $themen[$thema][$name]
             $notiz = [string](& $eig $e 'Notiz')
-            if (-not $e.Erreicht) { $z.Add('Von der Wartungsautomatik nicht erreicht' + $(if ($notiz) { ': ' + $notiz } else { '' })); continue }
+            if (-not $e.Erreicht) { $z.Add('von der Wartungsautomatik nicht erreicht'); continue }
             $pr = & $eig $e 'Pruefungen'
             $w = & $eig $e 'Werte'
             $falsch = @()
             if ($pr) { $falsch = @($pr.PSObject.Properties | Where-Object { $_.Value -eq $false } | ForEach-Object { $_.Name }) }
-            $rest = @($falsch | Where-Object { $_ -notin 'DiensteGestartet', 'Speicherplatz' })
-            if ($skriptName -match '^04\.') {
-                foreach ($ev in @(& $eig $w 'Ereignisse')) {
-                    if (-not $ev) { continue }
-                    $z.Add(('{0}, Ereignis-ID {1}: {2} ({3}), {4}x – {5}' -f $ev.Datum, $ev.Id, $ev.Quelle, $ev.Log, $ev.Anzahl, (& $kuerzen $ev.Text 200)))
-                }
+            $istServer = ($thema -eq 'Server')
+            $anzDienste = @(@(& $eig $w 'DiensteGestoppt') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -and $_ -notmatch '^Status\s+StartType' -and $_ -notmatch '^-{3,}' }).Count
+            if ($istServer) {
+                $ids = @(@(& $eig $w 'Ereignisse') | Where-Object { $_ } | ForEach-Object { [string]$_.Id } | Select-Object -Unique)
+                if ($ids.Count -gt 0) { $z.Add('Ereignis-IDs ' + ($ids -join ', ')) }
             }
             if ($falsch -contains 'DiensteGestartet') {
-                $d = @(@(& $eig $w 'DiensteGestoppt') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -and $_ -notmatch '^Status\s+StartType' -and $_ -notmatch '^-{3,}' } | ForEach-Object { $_ -replace '^Stopped\s+Automatic\s+', '' })
-                $z.Add('Dienste gestoppt' + $(if ($d.Count) { ': ' + ($d -join ', ') } else { '' }))
+                if ($istServer) { $dienste[$name] = $anzDienste }
+                elseif (-not $dienste.Contains($name)) { $z.Add('Dienste gestoppt') }
             }
-            if ($falsch -contains 'Speicherplatz') {
-                $d = @(@(& $eig $w 'Speicherplatz') | Where-Object { $_ -and $null -ne $_.FreiProzent -and [double]$_.FreiProzent -lt 10 } | ForEach-Object { '{0} {1} % frei ({2} GB)' -f $_.Laufwerk, (& $dezimal $_.FreiProzent), (& $dezimal $_.FreiGB) })
-                $z.Add('Speicherplatz unter 10 % frei' + $(if ($d.Count) { ': ' + ($d -join ', ') } else { '' }))
+            if ($istServer -and ($falsch -contains 'Speicherplatz')) {
+                $d = @(@(& $eig $w 'Speicherplatz') | Where-Object { $_ -and $null -ne $_.FreiProzent -and [double]$_.FreiProzent -lt 10 } | ForEach-Object { '{0} {1} {2} GB' -f $name, $_.Laufwerk, (& $dezimal $_.FreiGB) })
+                if ($d.Count -gt 0) { foreach ($x in $d) { $platz.Add($x) } } else { $platz.Add("$name zu knapp") }
             }
+            $rest = @($falsch | Where-Object { $_ -ne 'DiensteGestartet' -and -not ($istServer -and $_ -eq 'Speicherplatz') })
             if ($rest.Count -gt 0) {
                 $teile = @($notiz -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^Automatische Dienste' -and $_ -notmatch '^Speicherplatz' -and $_ -notmatch '^Version\s' })
                 if ($teile.Count -gt 0) { foreach ($t in $teile) { $z.Add($t) } }
-                else { foreach ($k in $rest) { $z.Add('Prüfung nicht bestanden: ' + $k) } }
+                else { foreach ($k in $rest) { $z.Add($(if ($keyText.ContainsKey($k)) { $keyText[$k] } else { "Prüfung $k nicht bestanden" })) } }
             }
-            elseif ($skriptName -match '^04\.' -and $notiz) { $z.Add($notiz) }
+            elseif ($istServer -and $notiz) { $z.Add($notiz) }
+            if ($thema -eq 'Active Directory') {
+                $b = & $eig $w 'InaktiveBenutzer'; $c = & $eig $w 'InaktiveComputer'
+                $teile = @()
+                if ([int]$b -gt 0) { $teile += "$b inaktive Benutzer" }
+                if ([int]$c -gt 0) { $teile += "$c inaktive Computer" }
+                if ($teile.Count -gt 0) { $z.Add($teile -join ', ') }
+            }
         }
     }
     $zeilen = [System.Collections.Generic.List[string]]::new()
-    foreach ($n in $geraete.Keys) {
-        $l = @($geraete[$n] | Select-Object -Unique)
-        if ($l.Count -eq 0) { continue }
-        $zeilen.Add("- ${n}:")
-        foreach ($x in $l) { $zeilen.Add("-- $x") }
+    foreach ($thema in $themen.Keys) {
+        $je = [ordered]@{}
+        foreach ($n in $themen[$thema].Keys) { $l = @($themen[$thema][$n] | Select-Object -Unique); if ($l.Count -gt 0) { $je[$n] = $l } }
+        $extra = [System.Collections.Generic.List[string]]::new()
+        if ($thema -eq 'Server') {
+            if ($dienste.Count -gt 0) { $extra.Add('Dienste gestoppt: ' + (($dienste.Keys) -join ', ')) }
+            if ($platz.Count -gt 0) { $extra.Add('Speicherplatz niedrig: ' + ($platz -join ', ')) }
+        }
+        if ($je.Count -eq 0 -and $extra.Count -eq 0) { continue }
+        if ($thema -in 'Server', 'Backup') {
+            $zeilen.Add("- ${thema}:")
+            foreach ($n in $je.Keys) { $zeilen.Add("-- ${n}: " + ($je[$n] -join ', ')) }
+            foreach ($x in $extra) { $zeilen.Add("-- $x") }
+        }
+        elseif ($je.Count -eq 1) { $zeilen.Add("- ${thema}: " + ($je[@($je.Keys)[0]] -join ', ')) }
+        else { $zeilen.Add("- ${thema}: " + ((@($je.Keys) | ForEach-Object { "${_}: " + ($je[$_] -join ', ') }) -join '; ')) }
     }
-    $kopf = $(if ($zeilen.Count -gt 0) { 'proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, folgende Auffälligkeiten festgestellt:' } else { 'proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, keine Auffälligkeiten' })
+    $kopf = $(if ($zeilen.Count -gt 0) { '- proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, folgende Auffälligkeiten festgestellt:' } else { '- proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, keine Auffälligkeiten' })
     (@($kopf) + $zeilen) -join "`r`n" | Set-Content -LiteralPath $Pfad -Encoding utf8BOM
 }
 
