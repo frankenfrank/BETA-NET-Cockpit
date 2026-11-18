@@ -436,7 +436,7 @@ foreach ($TargetDC in $AllDCs) {
         if ($stoppedServicesText -and $stoppedServicesText.Trim()) {
             Add-Content $AusgabeDatei $stoppedServicesText
             $prDc['DiensteGestartet'] = $false
-            $werteDc['DiensteGestoppt'] = @(($stoppedServicesText -split "`r?`n") | Where-Object { $_.Trim() -and $_ -notmatch '^(Status|-{3,})' } | ForEach-Object { $_.Trim() })
+            $werteDc['DiensteGestoppt'] = @(($stoppedServicesText -split "`r?`n") | Where-Object { $_.Trim() -and $_.Trim() -notmatch '^(Status\s|-{3,})' } | ForEach-Object { $_.Trim() })
             $notizDc += 'Automatische Dienste gestoppt'
         } else {
             Add-Content $AusgabeDatei "Keine gestoppten automatischen Dienste gefunden."
@@ -532,8 +532,12 @@ foreach ($TargetDC in $AllDCs) {
                 $officialIps = @()
                 if ($OnlineRootIPs.ContainsKey($srv)) { $officialIps = $OnlineRootIPs[$srv] }
 
+                # Vergleich nur in den Adressfamilien, die lokal vorhanden sind (lokale Hints enthalten meist nur IPv4)
+                $vergleichIps = @($officialIps)
+                if (-not (@($localIps | Where-Object { $_ -match ":" }).Count)) { $vergleichIps = @($officialIps | Where-Object { $_ -notmatch ":" }) }
+
                 $localJoin    = (@($localIps)    | Sort-Object -Unique) -join "|"
-                $officialJoin = (@($officialIps) | Sort-Object -Unique) -join "|"
+                $officialJoin = (@($vergleichIps) | Sort-Object -Unique) -join "|"
 
                 [pscustomobject]@{
                     NameServer       = $srv
