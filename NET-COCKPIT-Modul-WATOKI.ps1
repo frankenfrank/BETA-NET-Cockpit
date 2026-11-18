@@ -19,7 +19,7 @@
     - Vor dem Start fragt das Cockpit fehlende Kennwörter der Konten ab (einmal pro Benutzername)
     - Knopf "Automatik stoppen": beendet das laufende Skript, startet die übrigen nicht mehr (Status abgebrochen) und speichert die bisherigen Ergebnisse
     - Status je Lauf: OK, übersprungen, abgebrochen oder Fehler (auch bei Zeitlimit von 10 Minuten oder Exitcode ungleich 0; bei Fehler steht die Notiz aus der Ergebnisdatei in der Meldung, sonst die letzte Konsolenzeile)
-    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Autowartung-Gesamtdatei.json (maschinenlesbar für den Wartinator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts) und Techniker-Uebersicht.html (wie die Wartungscheckliste gegliedert, Fehler und Auffälligkeiten oben, als PDF druckbar)
+    - Ergebnis im Ordner Autowartung_<yyyyMMdd_HHmmss> im Ausgabeordner: Autowartung-Gesamtdatei.json (maschinenlesbar für den Wartinator) und Detail.txt (gegliedert für den Techniker, enthält die Konsolenausgabe jedes Skripts) und Techniker-Uebersicht.html (wie die Wartungscheckliste gegliedert, Fehler und Auffälligkeiten oben, als PDF druckbar) und Lieferschein.txt (Entwurf: nur die Auffälligkeiten aus den Skripten je Gerät, ohne Bewertung, im Format des Wartungs-Prompts)
     - Knopf Automatik prüfen: testet vorab je Gerät Name, Ping, WinRM-/SSH-Anmeldung und nötige Module (nur lesend) und zeigt einen Bericht (wird auch als Automatik-Pruefung_<Datum>.txt gespeichert)
     - Vertrag für die Skripte: ein Skript mit -Automatik fragt nichts ab, öffnet nichts und schreibt seine Werte für die Checkliste als Ergebnis_<Skriptname ohne Wartung- und .ps1>.json in -Ausgabeordner (wird unverändert in die Gesamtdatei übernommen); alles Ausführliche gibt es auf der Konsole aus (landet in Detail.txt)
     Sonst speichert das Modul nichts.
@@ -606,6 +606,62 @@ function script:New-WolWtTechnikerHtml {
     $h.ToString() | Set-Content -LiteralPath $Pfad -Encoding utf8BOM
 }
 
+## Lieferschein-Entwurf: nur die Auffälligkeiten aus den Skriptergebnissen, ohne Bewertung, im Format des Wartungs-Prompts
+function script:New-WolWtLieferschein {
+    param($Gesamt, [string]$Pfad)
+    $eig = { param($o, $n) if ($null -ne $o -and $o.PSObject.Properties[$n]) { $o.PSObject.Properties[$n].Value } else { $null } }
+    $kurzZiel = { param($z) $s = ([string]$z).Trim(); if ($s -match '^\d+(\.\d+){3}$') { $s } else { ($s -split '\.')[0] } }
+    $kuerzen = { param($t, $max) $s = (([string]$t) -replace '\s+', ' ').Trim(); if ($s.Length -gt $max) { $s.Substring(0, $max).TrimEnd() + '...' } else { $s } }
+    $dezimal = { param($x) ([double]$x).ToString('0.0', [System.Globalization.CultureInfo]::InvariantCulture).Replace('.', ',') }
+    $geraete = [ordered]@{}
+    foreach ($s in @($Gesamt.Skripte)) {
+        $skriptName = [string](& $eig $s 'Skript')
+        $erg = & $eig $s 'Ergebnis'
+        foreach ($e in @(& $eig $erg 'Ergebnisse')) {
+            if (-not $e) { continue }
+            $name = & $kurzZiel $e.Ziel
+            if (-not $geraete.Contains($name)) { $geraete[$name] = [System.Collections.Generic.List[string]]::new() }
+            $z = $geraete[$name]
+            $notiz = [string](& $eig $e 'Notiz')
+            if (-not $e.Erreicht) { $z.Add('Von der Wartungsautomatik nicht erreicht' + $(if ($notiz) { ': ' + $notiz } else { '' })); continue }
+            $pr = & $eig $e 'Pruefungen'
+            $w = & $eig $e 'Werte'
+            $falsch = @()
+            if ($pr) { $falsch = @($pr.PSObject.Properties | Where-Object { $_.Value -eq $false } | ForEach-Object { $_.Name }) }
+            $rest = @($falsch | Where-Object { $_ -notin 'DiensteGestartet', 'Speicherplatz' })
+            if ($skriptName -match '^04\.') {
+                foreach ($ev in @(& $eig $w 'Ereignisse')) {
+                    if (-not $ev) { continue }
+                    $z.Add(('{0}, Ereignis-ID {1}: {2} ({3}), {4}x – {5}' -f $ev.Datum, $ev.Id, $ev.Quelle, $ev.Log, $ev.Anzahl, (& $kuerzen $ev.Text 200)))
+                }
+            }
+            if ($falsch -contains 'DiensteGestartet') {
+                $d = @(@(& $eig $w 'DiensteGestoppt') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -and $_ -notmatch '^Status\s+StartType' -and $_ -notmatch '^-{3,}' } | ForEach-Object { $_ -replace '^Stopped\s+Automatic\s+', '' })
+                $z.Add('Dienste gestoppt' + $(if ($d.Count) { ': ' + ($d -join ', ') } else { '' }))
+            }
+            if ($falsch -contains 'Speicherplatz') {
+                $d = @(@(& $eig $w 'Speicherplatz') | Where-Object { $_ -and $null -ne $_.FreiProzent -and [double]$_.FreiProzent -lt 10 } | ForEach-Object { '{0} {1} % frei ({2} GB)' -f $_.Laufwerk, (& $dezimal $_.FreiProzent), (& $dezimal $_.FreiGB) })
+                $z.Add('Speicherplatz unter 10 % frei' + $(if ($d.Count) { ': ' + ($d -join ', ') } else { '' }))
+            }
+            if ($rest.Count -gt 0) {
+                $teile = @($notiz -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^Automatische Dienste' -and $_ -notmatch '^Speicherplatz' -and $_ -notmatch '^Version\s' })
+                if ($teile.Count -gt 0) { foreach ($t in $teile) { $z.Add($t) } }
+                else { foreach ($k in $rest) { $z.Add('Prüfung nicht bestanden: ' + $k) } }
+            }
+            elseif ($skriptName -match '^04\.' -and $notiz) { $z.Add($notiz) }
+        }
+    }
+    $zeilen = [System.Collections.Generic.List[string]]::new()
+    foreach ($n in $geraete.Keys) {
+        $l = @($geraete[$n] | Select-Object -Unique)
+        if ($l.Count -eq 0) { continue }
+        $zeilen.Add("- ${n}:")
+        foreach ($x in $l) { $zeilen.Add("-- $x") }
+    }
+    $kopf = $(if ($zeilen.Count -gt 0) { 'proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, folgende Auffälligkeiten festgestellt:' } else { 'proaktive IT-Wartung gem. Wartungscheckliste ausgeführt, keine Auffälligkeiten' })
+    (@($kopf) + $zeilen) -join "`r`n" | Set-Content -LiteralPath $Pfad -Encoding utf8BOM
+}
+
 ## Lauf abschließen: Autowartung-Gesamtdatei.json und Detail.txt schreiben
 function script:Complete-WolWtAutomatik {
     $l = $script:WtLauf
@@ -621,7 +677,7 @@ function script:Complete-WolWtAutomatik {
             Rechner      = $env:COMPUTERNAME
             Unbekannt    = @($l.Unbekannt)
             Zusammenfassung = [pscustomobject]@{ OK = [int]$zaehl['OK']; Uebersprungen = [int]$zaehl['übersprungen']; Fehler = [int]$zaehl['Fehler']; Abgebrochen = [int]$zaehl['abgebrochen'] }
-            Skripte      = @($l.Ergebnisse | ForEach-Object { [pscustomobject]@{ Skript = $_.Skript; Ziele = $_.Ziele; Status = $_.Status; Meldung = $_.Meldung; Start = $_.Start; Ende = $_.Ende; Sekunden = $_.Sekunden; Ergebnis = $_.Ergebnis } })
+            Skripte      = @($l.Ergebnisse | ForEach-Object { [pscustomobject]@{ Skript = $_.Skript; Ziele = $_.Ziele; Status = $_.Status; Meldung = $_.Meldung; Start = $_.Start; Ende = $_.Ende; Sekunden = $_.Sekunden; Konsole = $_.Konsole; Ergebnis = $_.Ergebnis } })
         }
         $gesamt | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath (Join-Path $l.Ordner 'Autowartung-Gesamtdatei.json') -Encoding utf8
         $text = [System.Collections.Generic.List[string]]::new()
@@ -642,6 +698,8 @@ function script:Complete-WolWtAutomatik {
         ($text -join "`r`n") | Set-Content -LiteralPath (Join-Path $l.Ordner 'Detail.txt') -Encoding utf8BOM
         try { New-WolWtTechnikerHtml -Gesamt $gesamt -Pfad (Join-Path $l.Ordner 'Techniker-Uebersicht.html') -Konsolen @($l.Ergebnisse | ForEach-Object { [string]$_.Konsole }) }
         catch { Write-WolLog "WaToKi-Automatik: Techniker-Übersicht nicht geschrieben: $($_.Exception.Message)" }
+        try { New-WolWtLieferschein -Gesamt $gesamt -Pfad (Join-Path $l.Ordner 'Lieferschein.txt') }
+        catch { Write-WolLog "WaToKi-Automatik: Lieferschein nicht geschrieben: $($_.Exception.Message)" }
         Write-WolLog "WaToKi-Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }) ($($l.Ordner))"
         $meldung = "Automatik beendet: $($zaehl['OK']) OK, $($zaehl['übersprungen']) übersprungen, $($zaehl['Fehler']) Fehler$(if ($zaehl['abgebrochen'] -gt 0) { ', ' + $zaehl['abgebrochen'] + ' abgebrochen' }). Ordner: $($l.Ordner)"
     }
