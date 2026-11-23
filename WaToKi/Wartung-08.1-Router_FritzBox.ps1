@@ -26,6 +26,7 @@ if (-not $Automatik) { Write-Host @'
 BESCHREIBUNG
 Fragt eine oder mehrere Fritz!Box im lokalen Netz ab (TR-064, UPnP-IGD + Weboberfläche) und schreibt das Ergebnis in eine Datei.
 Ruft ab: FRITZ!OS-Version, Update-Verfügbarkeit, letzter Reconnect, externe IP, WAN-Datenrate aus den Verbindungsdetails (Online-Monitor, Seite netMoni) und Log-Einträge mit Warn-/Fehlerbezug (Schlüsselwort-Filter).
+Schlägt der Ping fehl, wird nachgefragt, ob die Wartung trotzdem versucht werden soll (manche Fritz!Box blockieren ICMP, sind aber per HTTP/TR-064 erreichbar). Aus dem NET-COCKPIT (Automatik) wird sie ohne Rückfrage trotzdem versucht.
 
 Aus dem NET-COCKPIT (Modul WaToKi) gestartet bekommt das Skript die markierten Fritz!Box (-Ziel), den Ausgabeordner (-Ausgabeordner) und je Gerät das Konto der Spalte "Konto" (-AnmeldedatenJeZiel, jedes Gerät mit seinem eigenen Konto). Dann entfällt die Listenpflege und die Kontoabfrage. Ohne -Ziel läuft das Skript wie bisher interaktiv.
 
@@ -495,12 +496,22 @@ foreach ($Fritz in $FritzListe) {
         Probleme   = ""
     }
 
-    # -- Vorab-Check: Ping
-    if (-not (Test-Connection -ComputerName $Fritz -Count 1 -Quiet)) {
-        Write-Log "STATUS          : Nicht erreichbar (Ping fehlgeschlagen)"
-        $summary.Status = "Ping fehlgeschlagen"
-        $Zusammenfassung += [PSCustomObject]$summary
-        continue
+    # -- Vorab-Check: Ping (bei Fehlschlag Rückfrage, ob die Wartung trotzdem versucht werden soll; in der Automatik ohne Rückfrage immer versuchen)
+    $pingFehlgeschlagen = $false
+    $pingOk = Test-Connection -ComputerName $Fritz -Count 1 -Quiet
+    if (-not $pingOk) {
+        $pingFehlgeschlagen = $true
+        Write-Log "STATUS          : Nicht erreichbar (Ping fehlgeschlagen)" -ForegroundColor Red
+
+        $antwort = if ($Automatik) { 'j' } else { Read-Host "Ping fehlgeschlagen. Wartung für $Fritz trotzdem versuchen? (j/n)" }
+        if ($antwort -ne 'j') {
+            Write-Log "Wartung für $Fritz wurde nach fehlgeschlagenem Ping übersprungen."
+            $summary.Status = "Ping fehlgeschlagen (übersprungen)"
+            $Zusammenfassung += [PSCustomObject]$summary
+            continue
+        }
+
+        Write-Log "Wartung wird trotz fehlgeschlagenem Ping versucht." -ForegroundColor Yellow
     }
 
     # -- Zugangsdaten (pro Fritz!Box)
@@ -508,16 +519,23 @@ foreach ($Fritz in $FritzListe) {
     if (-not $cred) {
         Write-Log "STATUS          : Keine Zugangsdaten eingegeben"
         $summary.Status = "Keine Zugangsdaten"
+        if ($pingFehlgeschlagen) { $summary.Probleme = "Ping fehlgeschlagen (Wartung trotzdem versucht)" }
         $Zusammenfassung += [PSCustomObject]$summary
         continue
     }
 
     try {
-        $Zusammenfassung += Get-FritzStatus -FritzHost $Fritz -Cred $cred
+        $ergebnis = Get-FritzStatus -FritzHost $Fritz -Cred $cred
+        if ($pingFehlgeschlagen) {
+            $hinweis = "Ping fehlgeschlagen (Wartung trotzdem versucht)"
+            $ergebnis.Probleme = if ($ergebnis.Probleme) { "$hinweis | $($ergebnis.Probleme)" } else { $hinweis }
+        }
+        $Zusammenfassung += $ergebnis
     }
     catch {
         Write-Log "STATUS          : Fehler beim Abfragen der Fritz!Box: $($_.Exception.Message)" -ForegroundColor Red
         $summary.Status = "Fehler beim Abfragen"
+        if ($pingFehlgeschlagen) { $summary.Probleme = "Ping fehlgeschlagen (Wartung trotzdem versucht)" }
         $Zusammenfassung += [PSCustomObject]$summary
     }
 }
@@ -559,7 +577,7 @@ if ($Automatik) {
             if ($s.Update) { $teile += "Update: $($s.Update)" }
             if ($s.IPv4) { $teile += "IP $($s.IPv4)" }
             if ($s.Download -or $s.Upload) { $teile += "$($s.Download) / $($s.Upload)" }
-            if ($s.Probleme) { $teile += "nicht abrufbar: $($s.Probleme)" }
+            if ($s.Probleme) { $teile += "Probleme: $($s.Probleme)" }
         } else { $teile += [string]$s.Status }
         [pscustomobject]@{
             Ziel       = [string]$s.Fritzbox

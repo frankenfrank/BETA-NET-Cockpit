@@ -19,7 +19,7 @@
     - Ausgelesene Modulwerte (Windows-Version, WinGet, WAU, WOL, Hersteller und Modell) bleiben je Gerät gespeichert (MAC, sonst IP) und erscheinen nach dem Laden der Liste wieder; Spalte "Werte gelesen am"
     - Portscan (TCP), Dauerping, PowerShell-Befehl an mehrere Geräte, KuDo-Informationen auslesen (Client, Server physisch, Server virtuell; Windows per WinRM, Linux per SSH mit Posh-SSH; ergänzt leeres Hostname, MAC und Hersteller)
     - Konto pro Gerät (Spalte "Konto"; Dialog mit vorbelegtem Benutzernamen, leeres Kennwort erlaubt = Abfrage bei der ersten Aktion); scheitert eine Verbindung an den TrustedHosts, bietet das Cockpit das Eintragen an
-    - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
+    - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, Folder-Detective (Ordnergrößen als Baum), MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
     - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, SSH, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
     - Info: Reiter Voraussetzungen mit Allgemein sowie je einer Anleitung zur Grundfreischaltung (WinRM und Ping) per GPO und per Intune
@@ -36,7 +36,7 @@
     - Neustart, Herunterfahren, PowerShell-Befehl und KuDo-Informationen: WinRM (TCP 5985) und Administratorrechte auf dem Ziel (Windows)
     - KuDo-Informationen bei Linux-Geräten und ESXi-Hosts: SSH (TCP 22), PowerShell-Modul Posh-SSH auf dem Rechner mit dem Cockpit (das Cockpit bietet die Installation an), Benutzer aus der Spalte Konto (Kennwort, kein Root nötig)
     - Geräte, die Ping blockieren, werden als offline (Rot) angezeigt
-    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-SSH.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
+    - Module: Dateien NET-COCKPIT-Modul-OS.ps1, NET-COCKPIT-Modul-APP.ps1 und NET-COCKPIT-Modul-TREIBER.ps1, NET-COCKPIT-Modul-DIAGNOSE.ps1, NET-COCKPIT-Modul-WATOKI.ps1, NET-COCKPIT-Modul-RDP.ps1, NET-COCKPIT-Modul-SSH.ps1, NET-COCKPIT-Modul-MOUSEMOVER.ps1, NET-COCKPIT-Modul-FOLDERDETECTIVE.ps1 und NET-COCKPIT-Modul-WOL.ps1 sowie die Hilfedatei NET-COCKPIT-Hilfe.ps1 im selben Ordner wie dieses Skript; die Wartungsskripte des Moduls WaToKi liegen im Unterordner WaToKi
     - Start über start.ps1: Der Starter setzt die Umgebungsvariablen NETCOCKPIT_BASE (Proxy-Adresse) und NETCOCKPIT_KEY (öffentlicher Schlüssel) und legt zusätzlich die Datei net-cockpit-server.json neben das Cockpit; fehlt eine Moduldatei im Ordner, lädt das Cockpit sie darüber nach (Signaturprüfung), sonst bleibt es beim Ordner
 #>
 
@@ -139,6 +139,7 @@ $script:Module = [ordered]@{
     RDP     = @{ Name = 'RDP';             Datei = 'NET-COCKPIT-Modul-RDP.ps1';     Geladen = $false }
     SSH     = @{ Name = 'SSH';             Datei = 'NET-COCKPIT-Modul-SSH.ps1';     Geladen = $false }
     MOUSEMOVER = @{ Name = 'MouseMover';   Datei = 'NET-COCKPIT-Modul-MOUSEMOVER.ps1'; Geladen = $false }
+    FOLDERDETECTIVE = @{ Name = 'Folder-Detective'; Datei = 'NET-COCKPIT-Modul-FOLDERDETECTIVE.ps1'; Geladen = $false }
     WOL     = @{ Name = 'WOL';             Datei = 'NET-COCKPIT-Modul-WOL.ps1';     Geladen = $false }
 }
 $script:ModulInfo = @{}
@@ -1977,6 +1978,8 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Markierte aus Liste entfernen:** entfernt die markierten, sichtbaren Geräte nach einer Rückfrage aus der Geräteliste.' }
         @{ T = 'h'; X = 'PowerShell-Befehl senden' }
         @{ T = 'i'; X = '**PowerShell-Befehl senden...:** führt den Text als PowerShell auf den markierten, grünen Geräten aus (höchstens 20). Die Ausgabe steht pro Gerät in einem eigenen Reiter. Der Befehl läuft als ScriptBlock auf dem Zielgerät, Eingaben wie Read-Host funktionieren dort nicht. "Skript laden..." lädt eine .ps1-Datei in das Textfeld.' }
+        @{ T = 'h'; X = 'Folder-Detective' }
+        @{ T = 'i'; X = '**Folder-Detective:** zeigt Ordner- und Dateigrößen als Baum, während der Scan noch läuft (lokal oder per WinRM auf einem anderen Gerät). Mehr dazu weiter unten in diesem Reiter.' }
         @{ T = 'h'; X = 'MouseMover' }
         @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück und hält Rechner und Bildschirm wach. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu weiter unten in diesem Reiter.' }
     ) })
@@ -2106,11 +2109,12 @@ function Get-WolInfoInhalt {
         ) })
     }
 
-    ### MouseMover gehört zum Menü Werkzeuge: seine Hilfe hängt unten am Reiter Werkzeuge
-    if ($script:ModulInfo.ContainsKey('MOUSEMOVER')) {
-        $mm = & $script:ModulInfo['MOUSEMOVER']
+    ### Folder-Detective und MouseMover gehören zum Menü Werkzeuge: ihre Hilfe hängt unten am Reiter Werkzeuge
+    foreach ($werkzeugKey in 'FOLDERDETECTIVE', 'MOUSEMOVER') {
+        if (-not $script:ModulInfo.ContainsKey($werkzeugKey)) { continue }
+        $wi = & $script:ModulInfo[$werkzeugKey]
         $werkzeuge = $inhalt | Where-Object { $_.Titel -eq 'Werkzeuge' } | Select-Object -First 1
-        $werkzeuge.Bloecke = @($werkzeuge.Bloecke) + @(@{ T = 'h'; X = 'MouseMover (Details)' }) + @($mm.Bloecke)
+        $werkzeuge.Bloecke = @($werkzeuge.Bloecke) + @(@{ T = 'h'; X = "$($wi.Titel) (Details)" }) + @($wi.Bloecke)
     }
 
     ### Reihenfolge der Reiter: wie die Menüleiste
@@ -2604,6 +2608,7 @@ $script:Fenster = New-WolFenster @'
         <MenuItem x:Name="MnuEntfernen" Header="Markierte aus Liste entfernen"/>
         <MenuItem x:Name="MnuBefehl" Header="PowerShell-Befehl senden..."/>
         <Separator/>
+        <MenuItem x:Name="MnuFolderDetective" Header="Folder-Detective"/>
         <MenuItem x:Name="MnuMouseMover" Header="MouseMover"/>
       </MenuItem>
       <MenuItem Header="Ansicht">
@@ -3800,7 +3805,8 @@ function Set-WolKudoAdresse {
 ## Informationen auslesen: Windows (WinRM) und Linux (SSH) je nach offenem Port; -Einzeln für ein Gerät aus dem Detailfenster
 function Start-WolKudo {
     param($Ziele, [switch]$Einzeln)
-    $Ziele = @($Ziele)
+    ### Ohne markiertes Gerät kommt $null an; @($null) wäre ein Eintrag, deshalb leere Werte herausfiltern
+    $Ziele = @($Ziele | Where-Object { $null -ne $_ })
     if ($Ziele.Count -eq 0) { Show-WolMeldung 'Es ist kein Gerät markiert.'; return }
     if (-not $Einzeln -and (Get-WolGruppeOffen -Gruppe 'Kudo') -gt 0) {
         Show-WolMeldung 'Es läuft noch ein Auslesen. Bitte warten, bis es fertig ist.'
@@ -5577,6 +5583,7 @@ $script:MenueAktionen = [ordered]@{
     MnuEntfernen         = { Remove-WolMarkierte }
     MnuEinzelScan        = { Start-WolEinzelScan }
     MnuMouseMover        = { Open-WolModul -Key 'MOUSEMOVER' }
+    MnuFolderDetective   = { Open-WolModul -Key 'FOLDERDETECTIVE' }
     MnuHersteller        = { Start-WolHerstellerDownload }
     MnuKonto             = { Set-WolKontoMarkierte }
     MnuTrustedEintragen  = { Add-WolTrustedHosts }

@@ -192,6 +192,31 @@ $script:ModulInfo['SSH'] = {
     ) }
 }
 
+# Folder-Detective
+## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
+$script:ModulInfo['FOLDERDETECTIVE'] = {
+    @{ Titel = 'Folder-Detective'; Bloecke = @(
+        @{ T = 'h'; X = 'Was macht das Modul?' }
+        @{ T = 'p'; X = 'Zeigt **Ordner- und Dateigrößen als Baum**, während der Scan noch läuft: Ordner erscheinen sofort, die Größen wachsen live mit, die Sortierung wird alle zwei Sekunden neu angewendet (offene Ordner bleiben offen). Das Fenster öffnet sich über **Werkzeuge > Folder-Detective** und bleibt neben dem NET-COCKPIT offen.' }
+        @{ T = 'h'; X = 'Scan starten' }
+        @{ T = 'i'; X = '**Pfad wählen:** Laufwerk oder Ordner auf dem Rechner mit dem NET-COCKPIT. Der Pfad lässt sich auch ins Feld **Verzeichnis** tippen.' }
+        @{ T = 'i'; X = '**Remote Scan:** Laufwerk oder Ordner auf einem anderen Computer. Ein Fenster fragt nach den Zugangsdaten und dem Computer; **Verbinden** lädt die Laufwerke, Ordner lassen sich aufklappen, **OK** übernimmt Computer, Konto und Pfad. Gescannt wird danach mit **Scan starten**. **Remote beenden** schaltet zurück auf den eigenen Rechner.' }
+        @{ T = 'i'; X = '**Markiertes Gerät:** Ist im NET-COCKPIT genau ein Gerät markiert, übernimmt das Remote-Fenster dessen Namen (bei Geräten ohne auflösbaren Namen die IP-Adresse) und, wenn in der Spalte Konto eins steht, auch dieses Konto. Fehlt das Kennwort in dieser Sitzung, fragt das NET-COCKPIT danach. Bei keinem oder mehreren markierten Geräten gibt man Computer und Konto von Hand ein.' }
+        @{ T = 'i'; X = '**Pause und Abbrechen:** Pause gibt es nur bei lokalen Scans. Abbrechen zeigt das Teilergebnis.' }
+        @{ T = 'h'; X = 'Anzeige' }
+        @{ T = 'i'; X = '**Spalten:** Größe, Belegt (Platz auf dem Datenträger), Dateien, Ordner, % Anteil, Letzte Änderung und Hinweis. Klick auf eine Spaltenüberschrift sortiert, nochmal klicken dreht die Richtung um.' }
+        @{ T = 'i'; X = '**Aufklappen:** Klick auf das Plus-/Minus-Kästchen, Doppelklick auf einen Ordner oder Pfeiltasten Rechts/Links. Ein Doppelklick auf eine Datei macht nichts, es wird nie eine Datei gestartet.' }
+        @{ T = 'i'; X = '**Dateipfad öffnen** (Rechtsklick auf eine Zeile): zeigt Ordner oder Datei im Explorer, bei Remote-Scans als Adminfreigabe \\Computer\C$\...' }
+        @{ T = 'i'; X = '**Nicht lesbare Ordner:** werden mit "Zugriff verweigert" markiert, der Scan läuft weiter. Der Knopf **Nicht lesbare anzeigen** öffnet eine Liste mit Pfad und Meldung (Rechtsklick: Pfad kopieren).' }
+        @{ T = 'h'; X = 'Voraussetzungen und Gut zu wissen' }
+        @{ T = 'i'; X = '**Remote Scan:** WinRM (TCP 5985), ein Konto mit Administratorrechten auf dem Ziel und der PowerShell-7-Endpunkt (Sitzungskonfiguration PowerShell.7) auf dem Ziel. Fehlt PowerShell 7 dort, scheitert die Verbindung.' }
+        @{ T = 'i'; X = '**Adminfreigabe:** "Dateipfad öffnen" bei Remote-Scans braucht Zugriff auf die Adminfreigabe (zum Beispiel C$) des Ziels.' }
+        @{ T = 'i'; X = '**Verknüpfungen:** Junctions und Symlinks werden nicht verfolgt.' }
+        @{ T = 'i'; X = '**Log:** Start, Ergebnis und Fehler der Scans stehen im Log des NET-COCKPIT. Das Modul speichert nichts.' }
+        @{ T = 'w'; X = 'Noch nicht im NET-COCKPIT getestet: Fenster, lokaler Scan und Remote Scan mit markiertem Gerät auf einem echten Rechner.' }
+    ) }
+}
+
 # MouseMover
 ## Reiter der Info (Blöcke: h = Überschrift, p = Absatz, i = Listenpunkt, w = Hinweiskasten)
 $script:ModulInfo['MOUSEMOVER'] = {
