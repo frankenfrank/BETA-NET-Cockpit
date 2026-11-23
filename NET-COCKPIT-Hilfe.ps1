@@ -197,7 +197,7 @@ $script:ModulInfo['SSH'] = {
 $script:ModulInfo['FOLDERDETECTIVE'] = {
     @{ Titel = 'Folder-Detective'; Bloecke = @(
         @{ T = 'h'; X = 'Was macht das Modul?' }
-        @{ T = 'p'; X = 'Zeigt **Ordner- und Dateigrößen als Baum**, während der Scan noch läuft: Ordner erscheinen sofort, die Größen wachsen live mit, die Sortierung wird alle zwei Sekunden neu angewendet (offene Ordner bleiben offen). Das Fenster öffnet sich über **Werkzeuge > Folder-Detective** und bleibt neben dem NET-COCKPIT offen.' }
+        @{ T = 'p'; X = 'Zeigt **Ordner- und Dateigrößen als Baum**, während der Scan noch läuft: Ordner erscheinen sofort, die Größen wachsen live mit, die Sortierung wird alle zwei Sekunden neu angewendet (offene Ordner bleiben offen). Das Fenster öffnet sich über **Module > Folder-Detective** und bleibt neben dem NET-COCKPIT offen.' }
         @{ T = 'h'; X = 'Scan starten' }
         @{ T = 'i'; X = '**Pfad wählen:** Laufwerk oder Ordner auf dem Rechner mit dem NET-COCKPIT. Der Pfad lässt sich auch ins Feld **Verzeichnis** tippen.' }
         @{ T = 'i'; X = '**Remote Scan:** Laufwerk oder Ordner auf einem anderen Computer. Ein Fenster fragt nach den Zugangsdaten und dem Computer; **Verbinden** lädt die Laufwerke, Ordner lassen sich aufklappen, **OK** übernimmt Computer, Konto und Pfad. Gescannt wird danach mit **Scan starten**. **Remote beenden** schaltet zurück auf den eigenen Rechner.' }

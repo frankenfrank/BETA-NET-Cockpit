@@ -19,9 +19,9 @@
     - Ausgelesene Modulwerte (Windows-Version, WinGet, WAU, WOL, Hersteller und Modell) bleiben je Gerät gespeichert (MAC, sonst IP) und erscheinen nach dem Laden der Liste wieder; Spalte "Werte gelesen am"
     - Portscan (TCP), Dauerping, PowerShell-Befehl an mehrere Geräte, KuDo-Informationen auslesen (Client, Server physisch, Server virtuell; Windows per WinRM, Linux per SSH mit Posh-SSH; ergänzt leeres Hostname, MAC und Hersteller)
     - Konto pro Gerät (Spalte "Konto"; Dialog mit vorbelegtem Benutzernamen, leeres Kennwort erlaubt = Abfrage bei der ersten Aktion); scheitert eine Verbindung an den TrustedHosts, bietet das Cockpit das Eintragen an
-    - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, Folder-Detective (Ordnergrößen als Baum), MouseMover
+    - Werkzeuge: Portscan, Dauerping, PowerShell-Befehl, KuDo-Informationen (mit Laufwerken und Speicherbalken), Neuer Client von Hand, Einzel-Scan markierter Geräte, MouseMover
     - Zuordnung beim Scan über die MAC-Adresse; eine IP, die ein anderes Gerät belegt, wird beim alten Eintrag entfernt
-    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, SSH, WaToKi, WOL): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
+    - Module im Menü Module (OS, APP, Treiber, Diagnose, RDP, SSH, WaToKi, WOL, Folder-Detective): jeweils eine eigene Datei im Ordner des NET-COCKPIT, wird erst beim ersten Aufruf geladen; beim Start über start.ps1 liegt nur das NET-COCKPIT bereit, ein Modul (beim Modul WaToKi auch die Wartungsskripte) holt das Cockpit beim ersten Aufruf mit Ladefenster vom Server und prüft es gegen seine .sig-Datei
     - Info: Reiter Voraussetzungen mit Allgemein sowie je einer Anleitung zur Grundfreischaltung (WinRM und Ping) per GPO und per Intune
     - Hilfetexte der Module: Datei NET-COCKPIT-Hilfe.ps1 neben dem Cockpit; die Info lädt sie beim Öffnen (bei Bedarf vom Server), damit alle Modul-Reiter ohne Start der Module lesbar sind
     - Modul APP: Status, App-Updates, Programme installieren, anzeigen (gemeinsame Liste mit Suche und CSV-Export) und deinstallieren, WinGet-Modul nachinstallieren, Winget-AutoUpdate (WAU) installieren und dessen Ausschlussliste bearbeiten (auch die Intune-Variante wird erkannt)
@@ -1978,8 +1978,6 @@ function Get-WolInfoInhalt {
         @{ T = 'i'; X = '**Markierte aus Liste entfernen:** entfernt die markierten, sichtbaren Geräte nach einer Rückfrage aus der Geräteliste.' }
         @{ T = 'h'; X = 'PowerShell-Befehl senden' }
         @{ T = 'i'; X = '**PowerShell-Befehl senden...:** führt den Text als PowerShell auf den markierten, grünen Geräten aus (höchstens 20). Die Ausgabe steht pro Gerät in einem eigenen Reiter. Der Befehl läuft als ScriptBlock auf dem Zielgerät, Eingaben wie Read-Host funktionieren dort nicht. "Skript laden..." lädt eine .ps1-Datei in das Textfeld.' }
-        @{ T = 'h'; X = 'Folder-Detective' }
-        @{ T = 'i'; X = '**Folder-Detective:** zeigt Ordner- und Dateigrößen als Baum, während der Scan noch läuft (lokal oder per WinRM auf einem anderen Gerät). Mehr dazu weiter unten in diesem Reiter.' }
         @{ T = 'h'; X = 'MouseMover' }
         @{ T = 'i'; X = '**MouseMover:** öffnet ein kleines Fenster, das immer im Vordergrund bleibt. Mit dem Schiebeschalter (I = an, O = aus) bewegt es alle 30 Sekunden den Mauszeiger 1 Pixel nach rechts und wieder zurück und hält Rechner und Bildschirm wach. Es zeigt das aktive Fenster unter dem Mauszeiger und den Countdown. Mehr dazu weiter unten in diesem Reiter.' }
     ) })
@@ -2098,7 +2096,7 @@ function Get-WolInfoInhalt {
     ) })
 
     ### Reiter Module: eine Auswahlleiste, darunter die Hilfe des gewählten Moduls (Reihenfolge wie im Menü Module)
-    $menueModule = 'APP', 'DIAGNOSE', 'OS', 'RDP', 'SSH', 'TREIBER', 'WATOKI', 'WOL'
+    $menueModule = 'APP', 'DIAGNOSE', 'FOLDERDETECTIVE', 'OS', 'RDP', 'SSH', 'TREIBER', 'WATOKI', 'WOL'
     $seiten = @($menueModule | Where-Object { $script:ModulInfo.ContainsKey($_) } | ForEach-Object { & $script:ModulInfo[$_] })
     if ($seiten.Count -gt 0) {
         $inhalt.Add(@{ Titel = 'Module'; Unter = $seiten })
@@ -2109,12 +2107,11 @@ function Get-WolInfoInhalt {
         ) })
     }
 
-    ### Folder-Detective und MouseMover gehören zum Menü Werkzeuge: ihre Hilfe hängt unten am Reiter Werkzeuge
-    foreach ($werkzeugKey in 'FOLDERDETECTIVE', 'MOUSEMOVER') {
-        if (-not $script:ModulInfo.ContainsKey($werkzeugKey)) { continue }
-        $wi = & $script:ModulInfo[$werkzeugKey]
+    ### MouseMover gehört zum Menü Werkzeuge: seine Hilfe hängt unten am Reiter Werkzeuge
+    if ($script:ModulInfo.ContainsKey('MOUSEMOVER')) {
+        $mm = & $script:ModulInfo['MOUSEMOVER']
         $werkzeuge = $inhalt | Where-Object { $_.Titel -eq 'Werkzeuge' } | Select-Object -First 1
-        $werkzeuge.Bloecke = @($werkzeuge.Bloecke) + @(@{ T = 'h'; X = "$($wi.Titel) (Details)" }) + @($wi.Bloecke)
+        $werkzeuge.Bloecke = @($werkzeuge.Bloecke) + @(@{ T = 'h'; X = 'MouseMover (Details)' }) + @($mm.Bloecke)
     }
 
     ### Reihenfolge der Reiter: wie die Menüleiste
@@ -2589,6 +2586,7 @@ $script:Fenster = New-WolFenster @'
       <MenuItem Header="Module">
         <MenuItem x:Name="MnuUpdApp" Header="APP"/>
         <MenuItem x:Name="MnuDiagnose" Header="Diagnose"/>
+        <MenuItem x:Name="MnuFolderDetective" Header="Folder-Detective"/>
         <MenuItem x:Name="MnuUpdOs" Header="OS"/>
         <MenuItem x:Name="MnuRdp" Header="RDP"/>
         <MenuItem x:Name="MnuSsh" Header="SSH"/>
@@ -2608,7 +2606,6 @@ $script:Fenster = New-WolFenster @'
         <MenuItem x:Name="MnuEntfernen" Header="Markierte aus Liste entfernen"/>
         <MenuItem x:Name="MnuBefehl" Header="PowerShell-Befehl senden..."/>
         <Separator/>
-        <MenuItem x:Name="MnuFolderDetective" Header="Folder-Detective"/>
         <MenuItem x:Name="MnuMouseMover" Header="MouseMover"/>
       </MenuItem>
       <MenuItem Header="Ansicht">

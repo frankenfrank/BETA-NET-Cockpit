@@ -1,7 +1,7 @@
 # NET-COCKPIT-Modul-FOLDERDETECTIVE.ps1
 <#
 .SYNOPSIS
-    Modul Folder-Detective für das NET-COCKPIT (Menü Werkzeuge > Folder-Detective)
+    Modul Folder-Detective für das NET-COCKPIT (Menü Module > Folder-Detective)
 
 .DESCRIPTION
     Wird vom NET-COCKPIT beim ersten Aufruf nachgeladen (liegt im selben Ordner) und öffnet ein Fenster, das Ordner- und Dateigrößen als Baum zeigt, während der Scan noch läuft.
@@ -1205,7 +1205,7 @@ function script:Show-WolFdFehlerliste {
 }
 
 # Fenster
-## Wird vom Menü Werkzeuge > Folder-Detective aufgerufen: Fenster öffnen oder in den Vordergrund holen
+## Wird vom Menü Module > Folder-Detective aufgerufen: Fenster öffnen oder in den Vordergrund holen
 function script:Show-WolModulFOLDERDETECTIVE {
     if (-not $script:FdTypOk) {
         Show-WolMeldung "Der Folder-Detective kann nicht starten, weil in diesem Prozess noch eine ältere Version seiner Typen geladen ist.`r`n`r`nBitte das NET-COCKPIT beenden und neu starten." 'Warning'
